@@ -387,14 +387,15 @@ describe('completion runtime', () => {
     ]);
   });
 
-  it('keeps role-player request errors generic', async () => {
+  it('redacts role-player request errors with the same policy as judge errors', async () => {
     const provider = createScriptedCompletionProvider({
       id: MODEL.provider,
-      responses: [new Error('private provider detail')],
+      responses: [new Error('gateway HTTP 400 using secret-token')],
     });
     const signal = new AbortController().signal;
     const prepared = await prepareCompletionRuntime({
       runId: 'role-player-error-message',
+      redactionSecrets: ['secret-token'],
       bindings: completionBindingsForPlan(
         createTestResolvedRunPlan({
           mode: 'multi_turn',
@@ -407,7 +408,7 @@ describe('completion runtime', () => {
     });
     await assert.rejects(
       prepared.invoke('role_player', prompt('failure'), signal),
-      { message: 'Completion provider call failed.' },
+      { message: 'gateway HTTP 400 using [REDACTED]' },
     );
   });
 });

@@ -587,6 +587,24 @@ qualify. These group rates ignore file checks. MUST failures identify unmet
 requirements; SHOULD failures identify unmet recommendations. OPTIONAL
 statistics are telemetry and do not enter either scored group.
 
+Execution errors appear in the experiment's `experiment.json` attempt history
+and `report.json` run rows. When available, the attempt's `diagnostic` records
+the phase, a timeout/cancellation/failure reason, and a bounded,
+credential-redacted message, even if the run failed before saving artifacts.
+The attempt's optional `error_phase` retains the known phase independently of
+message detail. Only the engine mints execution diagnostics; host-added ones
+are ignored, and malformed diagnostics are dropped before checkpoint writes.
+After credentials are resolved, any `Error.message` can become a redacted
+diagnostic. Custom adapters and providers must keep sensitive data other than
+resolved credentials out of error messages.
+Attempt diagnostics and stderr progress can include role-player provider error
+text. Report rows retain only the stable `error_code` and `diagnostic.phase`,
+without diagnostic messages or reasons. Older attempts and plain host callback
+failures may have only `error_code`; host-thrown Forge errors also retain a valid
+phase, without trusting host-authored diagnostic text. For a committed Ava failure,
+`result.json.failure.message` records the final request or output rejection
+reason; raw rejected responses are not saved.
+
 ### Inspect evidence
 
 Runs may also contain `workspace-evidence.json`, `judge-evidence.json`, and

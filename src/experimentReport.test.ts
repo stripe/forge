@@ -116,6 +116,54 @@ describe('experiment run scorecards', () => {
     }
   });
 
+  it('allows only phase diagnostics on errored report rows', () => {
+    const errored = row(0);
+    Object.assign(errored, {
+      state: 'errored',
+      error_code: 'agent_failed',
+      diagnostic: { phase: 'interaction' },
+      evaluation: null,
+      result_path: null,
+    });
+    const report = build([errored]);
+    assert.deepEqual(parseExperimentRunReport(report).runs[0]!.diagnostic, {
+      phase: 'interaction',
+    });
+    for (const diagnostic of [
+      { phase: 'unknown' },
+      { phase: 'interaction', reason: 'failure' },
+      { phase: 'interaction', message: 'Provider text' },
+    ]) {
+      assert.throws(() =>
+        parseExperimentRunReport({
+          ...report,
+          runs: [{ ...report.runs[0]!, diagnostic }],
+        }),
+      );
+    }
+    for (const state of ['pending', 'completed'] as const) {
+      const run = row(0);
+      if (state === 'pending') {
+        Object.assign(run, {
+          state,
+          run_id: null,
+          attempt_count: 0,
+          evaluation: null,
+          result_path: null,
+        });
+      }
+      const valid = build([run]);
+      assert.throws(
+        () =>
+          parseExperimentRunReport({
+            ...valid,
+            runs: [{ ...valid.runs[0]!, diagnostic: { phase: 'interaction' } }],
+          }),
+        /Run identity, state and result metadata disagree/,
+      );
+    }
+  });
+
   it('retains model profiles in checkpoints and report rows and separates their score groups', () => {
     const runs = [row(0), row(1)];
     runs[0]!.selection.agent = {

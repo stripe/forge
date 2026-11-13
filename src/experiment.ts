@@ -4,11 +4,15 @@ import * as path from 'node:path';
 import { z } from 'zod';
 import type { ForgeComposition } from './contracts/composition.ts';
 import type { ForgeEngine } from './engine.ts';
-import { ForgeExecutionError } from './execution/errors.ts';
+import {
+  executionDiagnostic,
+  ForgeExecutionError,
+} from './execution/errors.ts';
 import type { ExecuteEvalInput } from './execution/execute.ts';
 import {
   type ExperimentRunAttempt as Attempt,
   type ExperimentRunCheckpoint,
+  experimentRunDiagnosticSchema,
   parseExperimentRunCheckpoint,
   experimentRunIdSchema as runIdSchema,
   type SettledExperimentRunAttempt as SettledAttempt,
@@ -69,6 +73,8 @@ export interface ExperimentRunOutcome {
   readonly error_code:
     | Extract<Attempt, { state: 'errored' }>['error_code']
     | null;
+  readonly error_phase?: Extract<Attempt, { state: 'errored' }>['error_phase'];
+  readonly diagnostic?: Extract<Attempt, { state: 'errored' }>['diagnostic'];
   readonly artifact: ExperimentRunArtifact | null;
 }
 
@@ -91,6 +97,14 @@ export type ExperimentRunProgressEvent =
       readonly selection: RunSelection;
       readonly run_id: string;
       readonly error_code: Extract<Attempt, { state: 'errored' }>['error_code'];
+      readonly error_phase?: Extract<
+        Attempt,
+        { state: 'errored' }
+      >['error_phase'];
+      readonly diagnostic?: Extract<
+        Attempt,
+        { state: 'errored' }
+      >['diagnostic'];
     };
 
 export interface ExperimentRunSummary {
@@ -443,15 +457,26 @@ export async function runExperiment(
             artifact = inspected.artifact;
           } catch (error) {
             // Error messages and causes may carry host data or credentials.
-            // Persist stable codes, never arbitrary strings from an adapter.
+            // Validate engine-minted detail; host-authored diagnostics are ignored.
+            const phase = experimentRunDiagnosticSchema.shape.phase.safeParse(
+              error instanceof ForgeExecutionError ? error.phase : undefined,
+            );
+            const diagnostic = experimentRunDiagnosticSchema.safeParse(
+              error instanceof ForgeExecutionError
+                ? { ...executionDiagnostic(error), phase: error.phase }
+                : undefined,
+            );
             attempt = {
               run_id: runId,
               state: 'errored',
-              error_code: signal.aborted
-                ? 'aborted'
-                : error instanceof ForgeExecutionError
+              error_code:
+                error instanceof ForgeExecutionError
                   ? error.code
-                  : 'execution_error',
+                  : signal.aborted
+                    ? 'aborted'
+                    : 'execution_error',
+              ...(phase.success ? { error_phase: phase.data } : {}),
+              ...(diagnostic.success ? { diagnostic: diagnostic.data } : {}),
             };
             // A callback can fail after its local commit (for example during
             // host cleanup). Keep the execution error while exposing verified
@@ -529,6 +554,10 @@ export async function runExperiment(
               inspected.artifact === null && last.state === 'errored'
                 ? last
                 : inspected.attempt;
+            const errorPhase =
+              effective.state === 'errored'
+                ? (effective.error_phase ?? effective.diagnostic?.phase)
+                : undefined;
             runs.push({
               selection_index: index,
               selection: entry.selection,
@@ -536,6 +565,9 @@ export async function runExperiment(
               state: effective.state,
               error_code:
                 effective.state === 'errored' ? effective.error_code : null,
+              ...(errorPhase !== undefined
+                ? { diagnostic: { phase: errorPhase } }
+                : {}),
               attempt_count: entry.attempts.length,
               result_path:
                 inspected.artifact === null
@@ -602,10 +634,21 @@ async function inspectAttempt(
     ) {
       throw new Error('Run belongs to a different selection.');
     }
+    const diagnostic = experimentRunDiagnosticSchema.safeParse({
+      phase: 'interaction',
+      reason: 'failure',
+      message: completed.result.failure?.message,
+    });
     const attempt: SettledAttempt =
       completed.result.failure === null
         ? { run_id: runId, state: 'completed' }
-        : { run_id: runId, state: 'errored', error_code: 'role_player_error' };
+        : {
+            run_id: runId,
+            state: 'errored',
+            error_code: 'role_player_error',
+            error_phase: 'interaction',
+            ...(diagnostic.success ? { diagnostic: diagnostic.data } : {}),
+          };
     const evaluation = completed.result.evaluation;
     return {
       attempt,
@@ -643,6 +686,12 @@ function experimentRunOutcome(
     run_id: attempt.run_id,
     state: attempt.state,
     error_code: attempt.state === 'errored' ? attempt.error_code : null,
+    ...(attempt.state === 'errored' && attempt.error_phase !== undefined
+      ? { error_phase: attempt.error_phase }
+      : {}),
+    ...(attempt.state === 'errored' && attempt.diagnostic !== undefined
+      ? { diagnostic: attempt.diagnostic }
+      : {}),
     artifact,
   };
 }

@@ -205,7 +205,7 @@ export function createClaudeCodeAdapter(
             !result.stdout.includes('"type":"result"')
           ) {
             throw new Error(
-              'Claude Code exited without a completed result event.',
+              `Claude Code exited with status ${result.exitCode} without a completed result event.`,
             );
           }
           const turn = parseClaudeStream(result.stdout);

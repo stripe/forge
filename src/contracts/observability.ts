@@ -1,14 +1,18 @@
-export type RunPhase =
-  | 'preflight'
-  | 'runtime_prepare'
-  | 'setup'
-  | 'interaction'
-  | 'quiesce'
-  | 'evidence'
-  | 'evaluation'
-  | 'artifact_stage'
-  | 'runtime_dispose'
-  | 'result_commit';
+/** @internal Shared values for the RunPhase contract and persisted schemas. */
+export const RUN_PHASES = [
+  'preflight',
+  'runtime_prepare',
+  'setup',
+  'interaction',
+  'quiesce',
+  'evidence',
+  'evaluation',
+  'artifact_stage',
+  'runtime_dispose',
+  'result_commit',
+] as const;
+
+export type RunPhase = (typeof RUN_PHASES)[number];
 
 export type RunEventType = 'phase_started' | 'phase_completed';
 

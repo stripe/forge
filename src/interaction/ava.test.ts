@@ -369,6 +369,19 @@ describe('AvaRolePlayer', () => {
       ],
     ];
 
+    const rejectionMessages: Record<string, string> = {
+      'duplicate needs': 'Ava returned duplicate private user needs.',
+      'too many needs':
+        'Ava response did not match the required schema at response.user_needs (too_big).',
+      'oversized need':
+        'Ava response did not match the required schema at response.user_needs[0].description (too_big).',
+      'oversized message':
+        'Ava response did not match the required schema at response.message (too_big).',
+      list: 'Ava returned a list instead of one human-like message.',
+      code: 'Ava returned implementation code in its message.',
+      'private terminology': 'Ava exposed private task-model terminology.',
+      'non-focused need leakage': 'Ava exposed a non-focused private need.',
+    };
     for (const [name, response] of invalidCases) {
       it(name, async () => {
         const completion = scriptedCompletion(response);
@@ -382,6 +395,7 @@ describe('AvaRolePlayer', () => {
           status: 'role_player_error',
           errorType: 'parse_error',
           attempts: MAX_AVA_ATTEMPTS,
+          message: rejectionMessages[name],
           explanation: `Ava returned invalid structured output after ${MAX_AVA_ATTEMPTS} attempts.`,
         });
         assert.equal(completion.calls.length, MAX_AVA_ATTEMPTS);
@@ -389,7 +403,7 @@ describe('AvaRolePlayer', () => {
     }
   });
 
-  it('retries request failures but never exposes provider details', async () => {
+  it('retries request failures and retains a bounded, redacted final message', async () => {
     const recovered = scriptedCompletion(
       new Error('temporary provider failure'),
       initialResponse(TWO_NEEDS, 'Question?'),
@@ -403,21 +417,58 @@ describe('AvaRolePlayer', () => {
     assert.equal(recovered.calls.length, 2);
 
     const failed = scriptedCompletion(
-      new Error('provider response contains sensitive detail'),
+      new Error(`provider unavailable: secret-key ${'x'.repeat(5000)}`),
     );
-    const failedTurn = await new AvaRolePlayer(
-      { task: 'x' },
-      failed.invoke,
-      noRetryWait,
-    ).nextTurn();
-    assert.deepEqual(failedTurn.error, {
-      status: 'role_player_error',
-      errorType: 'request_error',
-      attempts: MAX_AVA_ATTEMPTS,
-      explanation: `Ava request failed after ${MAX_AVA_ATTEMPTS} attempts.`,
-    });
-    assert.doesNotMatch(JSON.stringify(failedTurn), /sensitive detail/);
+    const failedTurn = await new AvaRolePlayer({ task: 'x' }, failed.invoke, {
+      ...noRetryWait,
+      redactionSecrets: ['secret-key'],
+    }).nextTurn();
+    assert.deepEqual(
+      { ...failedTurn.error, message: undefined },
+      {
+        status: 'role_player_error',
+        errorType: 'request_error',
+        attempts: MAX_AVA_ATTEMPTS,
+        message: undefined,
+        explanation: `Ava request failed after ${MAX_AVA_ATTEMPTS} attempts.`,
+      },
+    );
+    assert.doesNotMatch(JSON.stringify(failedTurn), /secret-key/);
+    assert.equal(failedTurn.error?.message?.length, 4096);
+    assert.match(
+      failedTurn.error!.message!,
+      /^provider unavailable: \[REDACTED\] x+…$/,
+    );
     assert.equal(failed.calls.length, MAX_AVA_ATTEMPTS);
+  });
+
+  it('keeps malformed JSON and schema diagnostics free of response values and unknown keys', async () => {
+    for (const [response, message] of [
+      ['{secret-response', 'Ava response was not valid JSON.'],
+      [
+        JSON.stringify({
+          user_needs: [{ description: 'safe', status: 'secret-status' }],
+          message: 'Hi',
+        }),
+        'Ava response did not match the required schema at response.user_needs[0].status (invalid_value).',
+      ],
+      [
+        JSON.stringify({
+          user_needs: [{ description: 'safe', status: 'remaining' }],
+          message: 'Hi',
+          'secret-key': true,
+        }),
+        'Ava response did not match the required schema at response (unrecognized_keys).',
+      ],
+    ]) {
+      const turn = await new AvaRolePlayer(
+        { task: 'x' },
+        scriptedCompletion(response!).invoke,
+        noRetryWait,
+      ).nextTurn();
+      assert.equal(turn.error?.message, message);
+      assert.doesNotMatch(JSON.stringify(turn.error), /secret-/);
+    }
   });
 
   it('does not retry an aborted completion', async () => {

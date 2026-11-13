@@ -108,6 +108,7 @@ import {
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.ts';
+import { boundedErrorMessage } from '../security/errorMessage.ts';
 import {
   assertNoSecrets,
   assertNoSecretsInJsonValue,
@@ -139,6 +140,8 @@ import {
   prepareCompletionRuntime,
 } from './completionRuntime.ts';
 import {
+  createExecutionErrorWithDiagnostic,
+  executionDiagnostic,
   executionError,
   ForgeExecutionError,
   type ForgeExecutionErrorCode,
@@ -327,6 +330,7 @@ export async function executeEvalWithTestHooks(
       phase = name;
       return operation();
     });
+  let diagnosticSecrets: readonly string[] | undefined;
 
   try {
     const preflight = await step('preflight', async () => {
@@ -367,6 +371,8 @@ export async function executeEvalWithTestHooks(
       ...credentialValues(environment),
       ...completions.secrets,
     ]);
+
+    diagnosticSecrets = secrets;
 
     prepared = await step('runtime_prepare', async () => {
       throwIfAborted(signal, phase);
@@ -729,21 +735,35 @@ export async function executeEvalWithTestHooks(
       result: committedResult,
     };
   } catch (error) {
+    // Cleanup may outlast the timeout; retain the failure which started it.
+    const aborted = signal.aborted;
+    const timedOut =
+      aborted &&
+      timeoutSignal.aborted &&
+      signal.reason === timeoutSignal.reason;
     await transaction?.rollback().catch(() => undefined);
     if (prepared && !runtimeDisposed) {
       await prepared.dispose().catch(() => undefined);
     }
-    if (signal.aborted) {
-      throw new ForgeExecutionError(
+    if (aborted) {
+      throw createExecutionErrorWithDiagnostic(
         'aborted',
         phase,
-        'The Forge run was aborted.',
+        timedOut
+          ? `The Forge run timed out after ${input.plan.limits.run_timeout_ms}ms.`
+          : 'The Forge run was cancelled by the caller.',
         {
           cause: signal.reason,
+          diagnostic: {
+            reason: timedOut ? 'timeout' : 'cancelled',
+            message: timedOut
+              ? `Run timeout of ${input.plan.limits.run_timeout_ms}ms exceeded.`
+              : 'Caller cancellation stopped the run.',
+          },
         },
       );
     }
-    throw mapExecutionError(error, phase);
+    throw mapExecutionError(error, phase, diagnosticSecrets);
   }
 }
 
@@ -844,12 +864,15 @@ async function executeInteraction(
       signal,
     },
     (request) => completions.invoke('role_player', request, signal),
-    waitBeforeCompletionRetry === undefined
-      ? {}
-      : {
-          waitBeforeRetry: (attempt, retrySignal) =>
-            waitBeforeCompletionRetry('role_player', attempt, retrySignal),
-        },
+    {
+      redactionSecrets: completions.secrets,
+      ...(waitBeforeCompletionRetry === undefined
+        ? {}
+        : {
+            waitBeforeRetry: (attempt: number, retrySignal: AbortSignal) =>
+              waitBeforeCompletionRetry('role_player', attempt, retrySignal),
+          }),
+    },
   );
   const conversation = await runConversation({
     session: trackedSession,
@@ -958,12 +981,14 @@ function rolePlayerErrorRecord(error: {
   readonly errorType: 'parse_error' | 'request_error';
   readonly attempts: number;
   readonly explanation: string;
+  readonly message?: string;
 }): RolePlayerErrorV1 {
   return Object.freeze({
     status: error.status,
     error_type: error.errorType,
     attempts: error.attempts,
     explanation: error.explanation,
+    ...(error.message === undefined ? {} : { message: error.message }),
   });
 }
 
@@ -2092,12 +2117,45 @@ const EXECUTION_ERROR_CODE_BY_PHASE: Readonly<
 function mapExecutionError(
   error: unknown,
   phase: RunPhase,
+  secrets: readonly string[] | undefined,
 ): ForgeExecutionError {
-  if (error instanceof ForgeExecutionError) return error;
-  return executionError(
+  if (error instanceof ForgeExecutionError) {
+    const message = `Forge failed during ${error.phase}.`;
+    const diagnostic = executionDiagnostic(error);
+    return createExecutionErrorWithDiagnostic(
+      error.code,
+      error.phase,
+      secrets === undefined ? message : error.message,
+      {
+        cause: error.cause,
+        diagnostic: {
+          reason: diagnostic?.reason ?? 'failure',
+          message:
+            secrets === undefined
+              ? message
+              : boundedErrorMessage(
+                  new Error(diagnostic?.message ?? error.message),
+                  'Forge execution failed.',
+                  secrets,
+                ),
+        },
+      },
+    );
+  }
+  const message = `Forge failed during ${phase}.`;
+  return createExecutionErrorWithDiagnostic(
     EXECUTION_ERROR_CODE_BY_PHASE[phase],
     phase,
-    `Forge failed during ${phase}.`,
-    error,
+    message,
+    {
+      cause: error,
+      diagnostic: {
+        reason: 'failure',
+        message:
+          secrets === undefined
+            ? message
+            : boundedErrorMessage(error, message, secrets),
+      },
+    },
   );
 }

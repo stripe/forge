@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
+import { RUN_PHASES } from './contracts/observability.ts';
 import { isSha256Digest } from './model/hashes.ts';
 import { parseRunSelection } from './model/parse.ts';
+import { MAX_ERROR_MESSAGE_CHARACTERS } from './security/errorMessage.ts';
 import {
   assertCompatibleForgeVersion,
   parseForgeBuildIdentity,
@@ -25,6 +27,14 @@ export const experimentRunErrorCodeSchema = z.enum([
   'setup_failed',
   'unsupported_capability',
 ]);
+export const experimentRunDiagnosticSchema = z
+  .object({
+    phase: z.enum(RUN_PHASES),
+    reason: z.enum(['failure', 'timeout', 'cancelled']),
+    message: z.string().min(1).max(MAX_ERROR_MESSAGE_CHARACTERS),
+  })
+  .strict();
+
 const attemptSchema = z.discriminatedUnion('state', [
   z
     .object({ run_id: experimentRunIdSchema, state: z.literal('running') })
@@ -37,6 +47,8 @@ const attemptSchema = z.discriminatedUnion('state', [
       run_id: experimentRunIdSchema,
       state: z.literal('errored'),
       error_code: experimentRunErrorCodeSchema,
+      error_phase: experimentRunDiagnosticSchema.shape.phase.optional(),
+      diagnostic: experimentRunDiagnosticSchema.optional(),
     })
     .strict(),
 ]);

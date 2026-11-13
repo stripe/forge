@@ -304,8 +304,23 @@ directories. Every new invocation receives a distinct experiment run ID.
 The checkpoint records its producing `forge` build identity and binds that ID
 to its directory. Each entry records its selection, canonical plan SHA-256,
 and ordered attempts with a unique eval run ID and `running`, `completed`, or
-`errored` state. Errored attempts retain only a stable error code. A bounded
-worker pool executes pending plans;
+`errored` state. Errored attempts retain a stable error code and an optional
+`diagnostic` with the execution phase, reason (`failure`, `timeout`, or
+`cancelled`), and a bounded message. Execution-boundary diagnostics appear in
+progress events and inspection outcomes even when no run artifact was committed.
+Attempts retain a known phase separately in optional `error_phase`, so dropping
+message detail does not lose it. Execution diagnostics are minted by an internal
+engine factory, outside the public `ForgeExecutionError` constructor. The scheduler
+reads only engine-owned diagnostics, ignoring host-added properties and getters,
+then validates them against the bounded strict schema before persistence. Missing,
+malformed, empty, or oversized detail is omitted while the stable code and valid
+phase remain. Plain host callback errors retain only a stable code. Report rows
+retain that code and `diagnostic.phase`, without diagnostic messages or reasons;
+older records may omit phase and diagnostic fields. Committed role-player failures
+recover their diagnostic from the verified result when its optional final message
+passes the same schema, including after a checkpoint interruption. Their bounded
+provider error text remains in attempt diagnostics and stderr progress, outside
+the report. A bounded worker pool executes pending plans;
 one coordinator serializes reservations, checkpoint mutations, and writes so
 out-of-order completions cannot overwrite one another. `jobs` defaults to one
 and is scheduling policy, excluded from plan identities. Checkpoint updates use
@@ -995,6 +1010,16 @@ retry waits. Exhaustion is a recordable interaction outcome, not a fatal run
 error. If it happens before the first agent turn, Forge emits a system-only
 fallback trajectory and records a null agent session identity.
 
+Exhausted decisions record a final `message` alongside the error type, attempt
+count, and summary explanation in `interaction.json` and `result.json`.
+Parse messages identify invalid JSON, the first fixed-schema path/category,
+or the specific Ava rule violated (such as a list or leaked private need).
+They never include rejected responses, received values, or unknown keys.
+Request messages retain a bounded, credential-redacted provider error message,
+using the same policy as criterion judging. Standalone Ava callers can provide
+`redactionSecrets` in execution options for custom invokers. These diagnostics
+do not change retries or stop semantics.
+
 `interaction.json` is a post-run audit of public turns plus Ava's need and
 decision history. It is never an execution input and is never supplied to the
 criterion judge.
@@ -1453,8 +1478,8 @@ Request diagnostics retain only the final error's message, redacting all
 resolved credentials before truncating to 4,096 characters. They omit stacks,
 causes, and other error properties; non-Error throws use a generic message.
 Custom completion providers must keep messages free of sensitive
-non-credential data such as request/response bodies. Role-player request
-errors remain generic. Standalone `judgeCriteria` callers can supply
+non-credential data such as request/response bodies. The same policy applies
+to role-player request errors. Standalone `judgeCriteria` callers can supply
 `redactionSecrets` in execution options for their custom invoker's diagnostics.
 Parse diagnostics identify invalid JSON or the first schema violation's path
 and category, never raw responses, unknown keys, or received values.
@@ -1654,9 +1679,12 @@ Other important safeguards include:
 - credentials are opaque references in authored data, plans, events, and
   results;
 - command contracts are argv arrays, so shell parsing is opt-in and visible;
-- only bounded, credential-redacted judge request messages are retained as
-  diagnostics; other provider/setup error details and setup-command output are
-  not persisted as ordinary metadata;
+- diagnostic messages retain only bounded, credential-redacted error messages,
+  never stacks, cause chains, raw command output, or rejected model responses;
+  trusted custom providers and adapters must keep error messages free of
+  sensitive non-credential data such as prompt bodies and file contents;
+  credential-resolution failures retain generic execution messages because the
+  complete redaction set is not yet available;
 - judge inputs are derived by allowlist after credential redaction;
 - native source is explicitly marked restricted, excluded from judging and
   scoring, and selected by exact session identity rather than “newest session”;
@@ -1675,11 +1703,26 @@ providers receive benchmark prompts and the evidence needed for their roles.
 
 Every run combines the caller's abort signal with the plan timeout. Fatal
 errors are mapped to stable `ForgeExecutionError` codes and the phase in which
-they occurred. On any failure Forge:
+they occurred. Until all credentials have been resolved, non-abort errors
+handled by the lifecycle catch use the fixed note `Forge failed during <phase>.`,
+including host-thrown `ForgeExecutionError` instances, which retain their own
+code and phase. After resolution, the controller attaches a credential-redacted
+diagnostic of at most 4,096 characters. Any `Error.message` can be retained after
+redaction, or an existing engine-minted diagnostic message; host-added diagnostic
+properties are ignored. Custom adapters and providers must keep their messages
+free of sensitive non-credential data. Diagnostics never include stacks or causes.
+Built-in agent process failures include the exit status without copying stdout
+or stderr.
+Caller cancellation and the plan timeout keep the `aborted` code but have
+distinct diagnostic reasons. The first signal to abort determines that reason,
+even if the other signal fires during cleanup. A new abort during cleanup does
+not replace the fatal error that started it. Caller-provided abort reasons
+are not persisted. On any failure Forge:
 
 1. rolls back an open artifact transaction;
 2. disposes a prepared runtime if it has not already been disposed; and
-3. surfaces an abort-specific error when the combined signal fired.
+3. surfaces an abort-specific error when the combined signal had already fired
+   when the failure was caught.
 
 Cleanup does not rely on an already-aborted execution signal. Runtime disposal
 is idempotent, and the Docker implementation waits for an in-progress quiesce

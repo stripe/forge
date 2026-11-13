@@ -177,6 +177,23 @@ describe('Codex adapter', () => {
     );
   });
 
+  it('retains a failed process exit status without copying command output', async () => {
+    const test = fixture({
+      command: () => ({
+        ...result('private stdout', 17),
+        stderr: 'private stderr',
+      }),
+    });
+    const session = await test.adapter.openSession(test.sessionContext);
+    await assert.rejects(
+      session.send('Run the task', { signal: test.sessionContext.signal }),
+      {
+        message:
+          'Codex exited with status 17 without a successful completed turn.',
+      },
+    );
+  });
+
   it('passes the selected model for metadata advisories on initial and resumed turns', async () => {
     const test = fixture({
       command: ({ scope }) => {
