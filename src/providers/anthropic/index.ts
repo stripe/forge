@@ -29,11 +29,14 @@ export const ANTHROPIC_API_KEY_CREDENTIAL = 'apiKey' as const;
 export const ANTHROPIC_AUTH_TOKEN_CREDENTIAL = 'authToken' as const;
 
 const MAX_BASE_URL_BYTES = 4_096;
+/** Thinking tokens share the output budget with answer text. */
+const ALWAYS_THINKING_MIN_MAX_TOKENS = 16_000;
 const MAX_SCHEMA_DEPTH = 100;
 const MAX_SCHEMA_NODES = 100_000;
 const SCHEMA_NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
 const CLAUDE_MODEL_VERSION =
   /(?:^|[./-])claude-(?:haiku|sonnet|opus)-(\d+)(?:[-.](\d{1,2}))?(?=$|[-./])/;
+const CLAUDE_FABLE_MODEL = /(?:^|[./-])claude-fable(?=$|[-./])/;
 const ANTHROPIC_UNSUPPORTED_SCHEMA_KEYWORDS = new Set([
   'minimum',
   'maximum',
@@ -84,13 +87,28 @@ export class AnthropicCompletionError extends Error {
   }
 }
 
-/** Anthropic structured outputs require Claude 4.5 or newer. */
+/** Forge supports structured outputs for Claude Haiku, Sonnet, and Opus 4.5+. */
 export function supportsAnthropicStructuredOutputModel(model: string): boolean {
+  return claudeModelCapabilities(model).structuredOutput;
+}
+
+function claudeModelCapabilities(model: string): {
+  structuredOutput: boolean;
+  alwaysThinks: boolean;
+} {
   const version = CLAUDE_MODEL_VERSION.exec(model);
-  if (!version) return false;
+  if (!version) {
+    return {
+      structuredOutput: false,
+      alwaysThinks: false,
+    };
+  }
   const major = Number(version[1]);
   const minor = Number(version[2] ?? 0);
-  return major > 4 || (major === 4 && minor >= 5);
+  return {
+    structuredOutput: major > 4 || (major === 4 && minor >= 5),
+    alwaysThinks: major >= 5,
+  };
 }
 
 /** Native Node.js fetch-based Messages provider with no ambient credential reads. */
@@ -294,6 +312,12 @@ function assertModel(model: ModelRefV1, providerId: string): void {
       'Anthropic completion model does not match this provider.',
     );
   }
+  if (CLAUDE_FABLE_MODEL.test(model.model)) {
+    throw new AnthropicCompletionError(
+      'invalid_request',
+      'Claude Fable is not supported yet as the judge or Ava model.',
+    );
+  }
   if (!supportsAnthropicStructuredOutputModel(model.model)) {
     throw new AnthropicCompletionError(
       'invalid_request',
@@ -456,9 +480,14 @@ function resolveCredential(
 
 function serializeRequest(request: CompletionRequest): string {
   try {
+    const capabilities = claudeModelCapabilities(request.model.model);
+    const requestedMaxTokens =
+      request.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS;
     const serialized = JSON.stringify({
       model: request.model.model,
-      max_tokens: request.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
+      max_tokens: capabilities.alwaysThinks
+        ? Math.max(requestedMaxTokens, ALWAYS_THINKING_MIN_MAX_TOKENS)
+        : requestedMaxTokens,
       messages: request.messages,
       ...(request.systemPrompt === undefined
         ? {}
@@ -596,6 +625,12 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
   const text: string[] = [];
   for (const block of value.content) {
     if (
+      isRecord(block) &&
+      (block.type === 'thinking' || block.type === 'redacted_thinking')
+    ) {
+      continue;
+    }
+    if (
       !isRecord(block) ||
       block.type !== 'text' ||
       typeof block.text !== 'string'
@@ -604,6 +639,7 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
     }
     text.push(block.text);
   }
+  if (text.length === 0) throw invalidResponse();
   const content = text.join('');
   if (structured) {
     try {

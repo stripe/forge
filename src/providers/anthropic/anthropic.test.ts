@@ -132,6 +132,148 @@ describe('Anthropic completion provider', () => {
     });
   });
 
+  it('preserves explicit temperature and its absence for external callers on direct and gateway requests', async () => {
+    for (const model of [
+      'claude-sonnet-4-6',
+      'claude-opus-4-6',
+      'claude-haiku-4-5',
+      'claude-sonnet-4-7',
+      'claude-opus-4-7',
+      'claude-opus-4-8',
+      'claude-opus-4-7-20261001',
+      'claude-sonnet-5-5',
+      'claude-opus-5-5',
+      'claude-haiku-5',
+      'anthropic/claude-sonnet-5',
+      'gateway/claude-opus-4.7',
+      'claude-sonnet-6-0',
+    ] as const) {
+      for (const gateway of [false, true]) {
+        const transport = recordingFetch(() =>
+          messageResponse({ content: '{"message":"continue"}' }),
+        );
+        const provider = createAnthropicCompletionProvider({
+          ...(gateway
+            ? { baseUrl: 'https://gateway.example.test/anthropic' }
+            : {}),
+          fetch: transport.fetch,
+        });
+        for (const temperature of [undefined, 0, 0.3]) {
+          const request = completionRequest({
+            model: { provider: 'anthropic', model },
+            ...(temperature === undefined ? {} : { temperature }),
+            responseSchema: schema,
+          });
+          await provider.complete(request, {
+            credentials: {
+              [gateway
+                ? ANTHROPIC_AUTH_TOKEN_CREDENTIAL
+                : ANTHROPIC_API_KEY_CREDENTIAL]: 'test-scoped-key',
+            },
+          });
+          const body = JSON.parse(String(transport.calls.at(-1)!.init.body));
+          assert.equal(
+            Object.hasOwn(body, 'temperature'),
+            temperature !== undefined,
+            model,
+          );
+          assert.equal(body.temperature, temperature, model);
+          assert.equal(request.temperature, temperature);
+        }
+      }
+    }
+  });
+
+  it('raises output caps for always-thinking Claude models on direct and gateway requests', async () => {
+    for (const [model, alwaysThinks] of [
+      ['claude-sonnet-4-6', false],
+      ['claude-opus-4-8', false],
+      ['claude-sonnet-5-5', true],
+      ['anthropic/claude-opus-5-5', true],
+      ['claude-haiku-5', true],
+      ['gateway/claude-sonnet-5.5', true],
+      ['claude-opus-6-0', true],
+    ] as const) {
+      for (const gateway of [false, true]) {
+        const transport = recordingFetch(() => messageResponse());
+        const provider = createAnthropicCompletionProvider({
+          ...(gateway
+            ? { baseUrl: 'https://gateway.example.test/anthropic' }
+            : {}),
+          fetch: transport.fetch,
+        });
+        for (const purpose of ['role_player', 'judge'] as const) {
+          for (const maxTokens of [
+            undefined,
+            400,
+            700,
+            1_024,
+            16_000,
+            ANTHROPIC_MAX_TOKENS,
+          ]) {
+            const request = completionRequest({
+              model: { provider: 'anthropic', model },
+              purpose,
+              ...(maxTokens === undefined ? {} : { maxTokens }),
+            });
+            await provider.complete(request, {
+              credentials: {
+                [gateway
+                  ? ANTHROPIC_AUTH_TOKEN_CREDENTIAL
+                  : ANTHROPIC_API_KEY_CREDENTIAL]: 'test-scoped-key',
+              },
+            });
+            const body = JSON.parse(String(transport.calls.at(-1)!.init.body));
+            const requested = maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS;
+            assert.equal(
+              body.max_tokens,
+              alwaysThinks ? Math.max(requested, 16_000) : requested,
+              model,
+            );
+            assert.equal(request.maxTokens, maxTokens);
+          }
+        }
+      }
+    }
+  });
+
+  it('excludes thinking blocks from plain and structured answers while retaining output usage', async () => {
+    for (const model of ['claude-sonnet-4-6', 'claude-sonnet-5-5']) {
+      for (const structured of [false, true]) {
+        const provider = createAnthropicCompletionProvider({
+          fetch: async () =>
+            Response.json({
+              type: 'message',
+              role: 'assistant',
+              content: [
+                { type: 'thinking', thinking: '', signature: 'signature' },
+                { type: 'redacted_thinking', data: 'private-redacted-data' },
+                { type: 'text', text: '{"message":' },
+                { type: 'thinking', thinking: 'private-thought' },
+                { type: 'text', text: '"continue"}' },
+              ],
+              stop_reason: 'end_turn',
+              usage: { input_tokens: 10, output_tokens: 100 },
+            }),
+        });
+        const response = await provider.complete(
+          completionRequest({
+            model: { provider: 'anthropic', model },
+            ...(structured ? { responseSchema: schema } : {}),
+          }),
+          {
+            credentials: { [ANTHROPIC_API_KEY_CREDENTIAL]: 'test-direct-key' },
+          },
+        );
+        assert.deepEqual(response, {
+          content: '{"message":"continue"}',
+          stopReason: 'end_turn',
+          usage: { inputTokens: 10, outputTokens: 100, cachedInputTokens: 0 },
+        });
+      }
+    }
+  });
+
   it('recursively projects unsupported constraints without mutating the neutral schema', async () => {
     const neutralSchema: StrictCompletionResponseSchema = {
       name: 'bounded_result',
@@ -472,6 +614,72 @@ describe('Anthropic completion provider', () => {
     assert.equal(destinationRequests, 0);
   });
 
+  it('explicitly rejects Fable for judge and Ava before credentials or fetch', async () => {
+    const transport = recordingFetch(() => messageResponse());
+    const provider = createAnthropicCompletionProvider({
+      fetch: transport.fetch,
+    });
+    for (const purpose of ['judge', 'role_player'] as const) {
+      for (const modelName of [
+        'claude-fable',
+        'claude-fable-5-1',
+        'claude-fable-5-1-20261101',
+        'anthropic/claude-fable-5-1',
+        'gateway/claude-fable-5.1',
+        'gateway.claude-fable-5-1',
+        'gateway-claude-fable-5-1',
+      ]) {
+        const model = { provider: 'anthropic', model: modelName };
+        const expected = {
+          name: 'AnthropicCompletionError',
+          code: 'invalid_request',
+          message:
+            'Claude Fable is not supported yet as the judge or Ava model.',
+        };
+        assert.equal(supportsAnthropicStructuredOutputModel(modelName), false);
+        assert.throws(
+          () => provider.requirements({ model, purpose }),
+          expected,
+        );
+        await assert.rejects(
+          provider.preflight!({
+            runId: 'run-fable',
+            model,
+            purpose,
+            credentials: {},
+            signal: new AbortController().signal,
+          }),
+          expected,
+        );
+        await assert.rejects(
+          provider.complete(completionRequest({ model, purpose }), {
+            credentials: {},
+          }),
+          expected,
+        );
+      }
+    }
+    assert.equal(transport.calls.length, 0);
+  });
+
+  it('keeps lookalike names on the generic unsupported-model error', () => {
+    const provider = createAnthropicCompletionProvider();
+    for (const model of ['notclaude-fable-5-1', 'claude-fabled-5-1']) {
+      assert.throws(
+        () =>
+          provider.requirements({
+            model: { provider: 'anthropic', model },
+            purpose: 'judge',
+          }),
+        {
+          code: 'invalid_request',
+          message:
+            'Anthropic Forge completions require Claude 4.5 or newer structured outputs.',
+        },
+      );
+    }
+  });
+
   it('rejects provider mismatches and unsupported structured-output models before fetch', async () => {
     const transport = recordingFetch(() => messageResponse());
     const provider = createAnthropicCompletionProvider({
@@ -739,6 +947,30 @@ describe('Anthropic completion provider', () => {
         content: [{ type: 'text', text: '{}' }],
         stop_reason: 'end_turn',
         usage: { input_tokens: -1, output_tokens: 1 },
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'private-thought' }],
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 1, output_tokens: 100 },
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'redacted_thinking', data: 'private-data' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 100 },
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '' },
+          { type: 'text', text: 42 },
+        ],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
       },
     ]) {
       const provider = createAnthropicCompletionProvider({

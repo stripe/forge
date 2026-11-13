@@ -135,7 +135,7 @@ describe('judgeCriteria', () => {
     ]);
     assert.equal(requests.length, 1);
     const request = requests[0]!;
-    assert.equal(request.temperature, 0);
+    assert.equal(Object.hasOwn(request, 'temperature'), false);
     assert.equal(request.maxTokens, 1024);
     assert.equal(request.responseSchema, CRITERION_JUDGMENT_RESPONSE_SCHEMA);
     assert.deepEqual(request.messages, [

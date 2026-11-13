@@ -297,7 +297,6 @@ export class AvaRolePlayer {
     const request = {
       systemPrompt,
       messages,
-      temperature: 0.3,
       maxTokens: initializing ? 700 : 400,
       responseSchema: initializing
         ? INITIAL_AVA_RESPONSE_SCHEMA

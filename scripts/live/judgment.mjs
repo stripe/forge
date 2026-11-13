@@ -40,7 +40,6 @@ export async function runCriterionJudgmentRegression(
             '{"results":[{"index":0,"passed":true,"explanation":"Missing \\`cancel_url\\`."}]}',
         },
       ],
-      temperature: 0,
       maxTokens: 1024,
       responseSchema: forge.CRITERION_JUDGMENT_RESPONSE_SCHEMA,
       signal,

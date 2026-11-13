@@ -42,7 +42,6 @@ const COMPLETION_STOP_REASONS = new Set<CompletionStopReason>([
 export interface CompletionPromptInput {
   readonly systemPrompt?: string;
   readonly messages: CompletionRequest['messages'];
-  readonly temperature?: number;
   readonly maxTokens?: number;
   readonly responseSchema?: StrictCompletionResponseSchema;
 }

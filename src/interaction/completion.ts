@@ -18,7 +18,6 @@ export type InteractionHistoryMessage = CompletionMessage & {
 export interface InteractionCompletionRequest {
   readonly systemPrompt: string;
   readonly messages: readonly InteractionHistoryMessage[];
-  readonly temperature: number;
   readonly maxTokens: number;
   readonly responseSchema: StrictCompletionResponseSchema;
   readonly signal: AbortSignal;

@@ -27,6 +27,7 @@ function scriptedCompletion(...steps: CompletionStep[]): {
   return {
     calls,
     async invoke(request) {
+      assert.equal(Object.hasOwn(request, 'temperature'), false);
       calls.push(request);
       const step = steps[Math.min(index, steps.length - 1)];
       index += 1;
@@ -109,7 +110,7 @@ describe('AvaRolePlayer', () => {
 
     assert.equal(completion.calls.length, 1);
     const request = completion.calls[0]!;
-    assert.equal(request.temperature, 0.3);
+    assert.equal(Object.hasOwn(request, 'temperature'), false);
     assert.equal(request.maxTokens, 700);
     assert.match(request.systemPrompt, /Add Checkout/);
     assert.match(request.systemPrompt, /Embrace reasonable human uncertainty/);

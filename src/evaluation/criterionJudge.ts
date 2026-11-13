@@ -59,7 +59,6 @@ export const CRITERION_JUDGMENT_RESPONSE_SCHEMA: StrictCompletionResponseSchema 
 export interface CriterionCompletionRequest {
   readonly systemPrompt: string;
   readonly messages: readonly CompletionMessage[];
-  readonly temperature: number;
   readonly maxTokens: number;
   readonly responseSchema: StrictCompletionResponseSchema;
   readonly signal: AbortSignal;
@@ -288,7 +287,6 @@ async function judgeOneCriterion(
       messages: [
         { role: 'user', content: 'Return the requested structured judgment.' },
       ],
-      temperature: 0,
       maxTokens: 1024,
       responseSchema: CRITERION_JUDGMENT_RESPONSE_SCHEMA,
       signal: input.signal ?? new AbortController().signal,
