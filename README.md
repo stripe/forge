@@ -658,7 +658,7 @@ points to the evaluation behind its scores. Its `result_path` still points to
 the original execution, relative to the report's `result_root`, which is the
 source experiment run. Rerunning the same command reuses saved regrades that
 parse strictly and match the same judge and committed run (its criteria, checks
-and digests), so an interrupted regrade can be continued; an invalid saved
+and digests), so an interrupted regrade can be continued (a saved `judge_error` evaluation is judged again, and successful judgments are kept); an invalid saved
 regrade fails only its run. An output that already holds regrades from another
 judge is rejected before any judge call or write, instead of mixing judges. Only one regrade can write to an output at a
 time: a second concurrent invocation fails, naming the output, instead of

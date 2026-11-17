@@ -127,6 +127,41 @@ describe('regradeExperimentRun', () => {
     assert.equal(sourceReport.runs[0]!.evaluation!.score, 1);
   });
 
+  it('retries a saved judge_error on rerun and keeps successful judgments', async () => {
+    const root = await temporaryRoot('forge-regrade-exp-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const output = path.join(root, 'regrade');
+    const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
+    const input = { experimentRun: source.experimentLocation, judge, output };
+    const first = await regradeExperimentRun(
+      {
+        ...input,
+        waitBeforeJudgeRetry: async () => {},
+      },
+      dependencies(['not json', 'not json', 'not json']).dependencies,
+    );
+    assert.equal(first.regraded, 1);
+    const file = path.join(output, 'runs', 'regrade-source.json');
+    assert.equal(
+      JSON.parse(await fs.readFile(file, 'utf8')).evaluation.status,
+      'judge_error',
+    );
+
+    const retry = dependencies([failingJudgment]);
+    const second = await regradeExperimentRun(input, retry.dependencies);
+    assert.equal(retry.scripted.calls.length, 1);
+    assert.equal(second.regraded, 1);
+    assert.equal(second.reused, 0);
+    const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(saved.evaluation.status, 'partial');
+
+    const again = dependencies([]);
+    const third = await regradeExperimentRun(input, again.dependencies);
+    assert.equal(third.reused, 1);
+    assert.equal(again.scripted.calls.length, 0);
+  });
+
   it('rejects an output holding another judge before any call or write', async () => {
     const root = await temporaryRoot('forge-regrade-exp-');
     roots.push(root);

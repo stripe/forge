@@ -31,7 +31,7 @@ export interface RegradeExperimentSummaryV1 {
   readonly output_location: string;
   readonly judge: ModelRefV1;
   readonly regraded: number;
-  /** Regrades already present for the same judge and committed result. */
+  /** Successful regrades already present for the same judge and committed result; saved `judge_error` evaluations are retried. */
   readonly reused: number;
   /** Completed runs without judging criteria; their checks-only evaluation is unchanged. */
   readonly not_judged: number;
@@ -187,7 +187,12 @@ export async function regradeExperimentRun(
       try {
         const saved = savedRegrades.get(index);
         if (saved?.kind === 'invalid') throw new Error(saved.message);
-        if (saved?.kind === 'valid')
+        // A saved judge_error says the judge was unavailable, not what it thought: redo it, and keep
+        // successful judgments.
+        if (
+          saved?.kind === 'valid' &&
+          saved.regrade.evaluation.status !== 'judge_error'
+        )
           return { kind: 'reused', regrade: saved.regrade };
         const regrade = await regradeCompletedRun(
           {
