@@ -610,6 +610,31 @@ describe('Codex exec stream', () => {
     assert.equal(parsed.text, '');
   });
 
+  it.each([
+    { status: 'failed', exit_code: null, isError: true },
+    { status: 'completed', exit_code: 2, isError: true },
+    { status: 'completed', exit_code: 0, isError: false },
+    { status: 'completed', exit_code: null, isError: false },
+  ])(
+    'derives a command error from either signal alone ($status, exit $exit_code)',
+    ({ status, exit_code, isError }) => {
+      const parsed = parseCodexStream(
+        stream(
+          item('command_execution', {
+            command: 'run',
+            status,
+            aggregated_output: 'output',
+            exit_code,
+          }),
+        ),
+      );
+      assert.deepEqual(parsed.toolCalls[0]?.result, {
+        content: 'output',
+        isError,
+      });
+    },
+  );
+
   it('requires the exact resume identity and does not manufacture it from the requested ID', () => {
     assert.equal(parseCodexStream(stream(), SESSION_ID).sessionId, SESSION_ID);
     assertInvalid(stream(), OTHER_SESSION_ID);
