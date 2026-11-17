@@ -1,0 +1,310 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'vitest';
+import type { AgentAdapter } from '../contracts/agent.ts';
+import { credentialReference } from '../contracts/credentials.ts';
+import type { AgentPluginInstaller } from '../contracts/plugin.ts';
+import { defaultForgeEngine } from '../engine.ts';
+import type { PluginMcpServerId } from '../model/types.ts';
+import {
+  createFakeRuntimeAdapter,
+  createMemoryArtifactStore,
+  createScriptedAgentAdapter,
+  createStaticCredentialResolver,
+} from '../testing/fakes.ts';
+import { createMemoryRunInputProvider } from '../testing/memoryInputs.ts';
+import { createTestResolvedRunPlan } from '../testing/plans.ts';
+
+function fixture(fail?: 'setup' | 'mcp' | 'prepare' | 'finalize' | 'cleanup') {
+  const mcpServers: PluginMcpServerId[] = ['stripe'];
+  const runtime = createFakeRuntimeAdapter();
+  const agent = createScriptedAgentAdapter({
+    id: 'codex',
+    requirements: {
+      executables: [],
+      stateDirectories: [],
+      environment: {
+        credentials: {
+          MODEL_KEY: { reference: credentialReference('model-key') },
+        },
+      },
+    },
+  });
+  const resolutions: string[] = [];
+  const installer: AgentPluginInstaller = {
+    supportsMcpBearerAuth: true,
+    preflight(distribution, context) {
+      assert.deepEqual(context.mcpServers, mcpServers);
+      return {
+        requirements: { executables: [], stateDirectories: [] },
+        async install({ commands }) {
+          await commands.run(['install']);
+          if (fail === 'setup') throw new Error('install failed');
+          return {
+            adapter: 'codex',
+            plugin: distribution.plugin,
+            marketplace: distribution.marketplace,
+            marketplace_commit: 'a'.repeat(40),
+            native_plugin_id: distribution.plugin,
+            version: '1.0.0',
+            source: { kind: 'marketplace-path' },
+            installed_tree: {
+              format: 'forge-plugin-tree-v1',
+              sha256: `sha256:${'b'.repeat(64)}`,
+              entry_count: 1,
+              file_count: 1,
+              size_bytes: 10,
+            },
+          };
+        },
+      };
+    },
+    async checkMcp({ commands }) {
+      await commands.run(['check-mcp']);
+      if (fail === 'mcp') throw new Error('mock-token authentication failed');
+    },
+  };
+  const configured: AgentAdapter = {
+    ...agent.adapter,
+    pluginInstaller: installer,
+    async prepare(context) {
+      await context.runtime.commands.uncredentialed.run(['prepare']);
+      if (fail === 'prepare') throw new Error('prepare failed');
+      await agent.adapter.prepare(context);
+    },
+  };
+  const plan = createTestResolvedRunPlan({
+    agent: { adapter: 'codex', provider: 'openai', model: 'unused' },
+    treatmentSetup: [
+      {
+        uses: 'forge/plugin',
+        with: { plugin: 'stripe' },
+      },
+    ],
+  });
+  const composition = {
+    runtime: {
+      ...runtime.adapter,
+      async prepare(input: Parameters<typeof runtime.adapter.prepare>[0]) {
+        const prepared = await runtime.adapter.prepare(input);
+        return {
+          ...prepared,
+          async finalizeSetup() {
+            if (fail === 'finalize') throw new Error('finalize failed');
+            await prepared.finalizeSetup();
+          },
+          async dispose() {
+            await prepared.dispose();
+            if (fail === 'cleanup') throw new Error('cleanup failed');
+          },
+        };
+      },
+    },
+    agents: new Map([[configured.id, configured]]),
+    credentialResolver: createStaticCredentialResolver(
+      { 'env:STRIPE_API_KEY': 'mock-token' },
+      {
+        onResolve(reference) {
+          resolutions.push(reference);
+        },
+      },
+    ),
+    inputProvider: createMemoryRunInputProvider(),
+    artifactStore: createMemoryArtifactStore().store,
+  };
+  return { runtime, agent, plan, composition, resolutions };
+}
+
+describe('runtime readiness', () => {
+  it('checks MCP after setup finalization, scopes tokens to agent commands and skips model auth', async () => {
+    const test = fixture();
+    const results = await defaultForgeEngine.validateRuntime([test]);
+    assert.deepEqual(test.resolutions, ['env:STRIPE_API_KEY']);
+    assert.equal(results[0]?.mcp_authentication, 'verified');
+    assert.equal(results[0]?.model_authentication, 'untested');
+    assert.deepEqual(test.agent.events, ['prepare']);
+    const run = test.runtime.runs[0]!;
+    assert.deepEqual(
+      run.commands.map(({ argv, scope, credentialEnvironmentNames }) => ({
+        argv,
+        scope,
+        credentialEnvironmentNames,
+      })),
+      [
+        {
+          argv: ['prepare'],
+          scope: 'uncredentialed',
+          credentialEnvironmentNames: [],
+        },
+        {
+          argv: ['install'],
+          scope: 'uncredentialed',
+          credentialEnvironmentNames: [],
+        },
+        {
+          argv: ['check-mcp'],
+          scope: 'agent',
+          credentialEnvironmentNames: ['STRIPE_API_KEY'],
+        },
+      ],
+    );
+    assert.ok(
+      run.events.indexOf('finalizeSetup') < run.events.indexOf('command:agent'),
+    );
+    assert.equal(run.events.at(-1), 'dispose');
+  });
+
+  it('rejects a missing native MCP checker before credential lookup or allocation', async () => {
+    const test = fixture();
+    const agent = test.composition.agents.get('codex')!;
+    test.composition.agents.set('codex', {
+      ...agent,
+      pluginInstaller: {
+        supportsMcpBearerAuth: true,
+        preflight: agent.pluginInstaller!.preflight,
+      },
+    });
+    await assert.rejects(
+      defaultForgeEngine.validateRuntime([test]),
+      /does not support native MCP readiness checks/,
+    );
+    assert.deepEqual(test.resolutions, []);
+    assert.equal(test.runtime.runs.length, 0);
+  });
+
+  for (const [field, value] of [
+    ['adapter', 'claude-code'],
+    ['plugin', 'other@stripe'],
+    ['marketplace', 'example/plugins'],
+    ['native_plugin_id', 'other@stripe'],
+  ] as const)
+    it(`rejects readiness for a receipt with a mismatched ${field}`, async () => {
+      const test = fixture();
+      const agent = test.composition.agents.get('codex')!;
+      const installer = agent.pluginInstaller!;
+      test.composition.agents.set('codex', {
+        ...agent,
+        pluginInstaller: {
+          ...installer,
+          preflight(distribution, context) {
+            const prepared = installer.preflight(distribution, context);
+            return {
+              ...prepared,
+              async install(input) {
+                return { ...(await prepared.install(input)), [field]: value };
+              },
+            };
+          },
+        },
+      });
+      await assert.rejects(
+        defaultForgeEngine.validateRuntime([test]),
+        /receipt does not match the expected plugin/,
+      );
+      assert.equal(test.runtime.runs[0]?.events.at(-1), 'dispose');
+      assert.ok(
+        !test.runtime.runs[0]?.commands.some(
+          ({ argv }) => argv[0] === 'check-mcp',
+        ),
+      );
+    });
+
+  it('preflights all selections before lookup and resolves all tokens before allocation', async () => {
+    const first = fixture();
+    const second = fixture();
+    second.composition.credentialResolver = createStaticCredentialResolver({});
+    await assert.rejects(
+      defaultForgeEngine.validateRuntime([first, second]),
+      /credentials/,
+    );
+    assert.equal(first.runtime.runs.length, 0);
+    assert.equal(second.runtime.runs.length, 0);
+    first.resolutions.length = 0;
+    await assert.rejects(
+      defaultForgeEngine.validateRuntime([
+        first,
+        {
+          ...second,
+          plan: {
+            ...second.plan,
+            agent: { ...second.plan.agent, adapter: 'missing' },
+          },
+        },
+      ]),
+      /agent|plan/,
+    );
+    assert.deepEqual(first.resolutions, []);
+  });
+
+  for (const stage of [
+    'setup',
+    'mcp',
+    'prepare',
+    'finalize',
+    'cleanup',
+  ] as const)
+    it(`cleans up after a ${stage} failure without exposing tokens`, async () => {
+      const test = fixture(stage);
+      await assert.rejects(
+        defaultForgeEngine.validateRuntime([test]),
+        (error) => {
+          assert.ok(error instanceof Error);
+          assert.match(error.message, /readiness|cleanup/);
+          assert.ok(!error.message.includes('[object Object]'));
+          if (stage === 'mcp')
+            assert.match(error.message, /\[REDACTED\] authentication failed/);
+          assert.ok(!error.message.includes('mock-token'));
+          return true;
+        },
+      );
+      assert.equal(test.runtime.runs[0]?.events.at(-1), 'dispose');
+    });
+
+  it('honors cancellation before allocating', async () => {
+    const test = fixture();
+    await assert.rejects(
+      defaultForgeEngine.validateRuntime([test], AbortSignal.abort()),
+    );
+    assert.equal(test.runtime.runs.length, 0);
+  });
+
+  it('redacts a resolved token if cancellation interrupts the remaining resolution', async () => {
+    const test = fixture();
+    const secret = 'partially-resolved-synthetic-token';
+    const controller = new AbortController();
+    test.composition.credentialResolver = {
+      async resolve() {
+        controller.abort(
+          new Error(`Credential lookup interrupted after ${secret}`),
+        );
+        return secret;
+      },
+    };
+    await assert.rejects(
+      defaultForgeEngine.validateRuntime([test], controller.signal),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(
+          error.message,
+          /credentials: Credential lookup interrupted after \[REDACTED\]/,
+        );
+        assert.ok(!error.message.includes(secret));
+        return true;
+      },
+    );
+    assert.equal(test.runtime.runs.length, 0);
+  });
+
+  it('reports invalid host resolver values at the credential stage', async () => {
+    const test = fixture();
+    test.composition.credentialResolver = {
+      async resolve() {
+        return null as unknown as string;
+      },
+    };
+    await assert.rejects(
+      defaultForgeEngine.validateRuntime([test]),
+      /Runtime readiness failed at credentials: Credential resolver returned an invalid value/,
+    );
+    assert.equal(test.runtime.runs.length, 0);
+  });
+});

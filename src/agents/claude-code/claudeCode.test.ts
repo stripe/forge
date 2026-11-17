@@ -13,6 +13,21 @@ import {
   createClaudeCodeAdapter,
 } from './index.ts';
 
+it('passes the explicit compatibility setting through the agent requirements', () => {
+  const adapter = createClaudeCodeAdapter();
+  const selection = {
+    adapter: 'claude-code',
+    provider: 'anthropic',
+    model: 'test',
+    disable_experimental_betas: true as const,
+  };
+  assert.equal(
+    adapter.requirements(selection).environment.variables
+      ?.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS,
+    '1',
+  );
+});
+
 describe('Claude Code adapter', () => {
   it('rejects model profiles even with a custom adapter ID', () => {
     const adapter = createClaudeCodeAdapter({ id: 'custom-agent' });

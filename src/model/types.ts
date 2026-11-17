@@ -209,6 +209,8 @@ export interface AgentSelectionV1 extends ModelRefV1 {
     temperature: boolean;
     attachment: boolean;
   };
+  /** Claude gateway compatibility; omit to retain the native beta behavior. */
+  disable_experimental_betas?: true;
 }
 
 export interface TreatmentV1 {

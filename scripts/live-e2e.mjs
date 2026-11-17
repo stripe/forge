@@ -49,6 +49,14 @@ try {
       signal,
       progress,
     });
+    const { runReadinessIntegrationSuite } = await import(
+      './live/readiness.mjs'
+    );
+    const readiness = await runReadinessIntegrationSuite({
+      ...configuration,
+      signal,
+      progress,
+    });
     const { runSetupIntegrationSuite } = await import('./live/setup.mjs');
     const setup = await runSetupIntegrationSuite({
       ...configuration,
@@ -66,6 +74,7 @@ try {
       mode,
       setup,
       image_build: imageBuild,
+      readiness,
       ...(codex === undefined ? {} : { codex }),
     };
   } else {

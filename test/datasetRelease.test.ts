@@ -20,6 +20,29 @@ const datasetRoot = path.join(releaseRoot, datasetPath);
 const experimentPath = path.join(releaseRoot, experimentFile);
 
 describe('sample dataset release', () => {
+  it('validates the portable plugin example for both native adapters without credentials', async () => {
+    let output = '';
+    let errors = '';
+    const code = await runCli(
+      [
+        'validate',
+        '--experiment',
+        path.join(releaseRoot, 'plugin-experiment.yaml'),
+      ],
+      {
+        environment: {},
+        stdout: (text) => {
+          output += text;
+        },
+        stderr: (text) => {
+          errors += text;
+        },
+      },
+    );
+    assert.equal(code, 0, errors);
+    assert.equal(JSON.parse(output).run_count, 2);
+  });
+
   it('validates the released dataset and plans its pinned public baseline without credentials', async () => {
     const [dataset, experiment] = await Promise.all([
       loadDataset(datasetRoot),

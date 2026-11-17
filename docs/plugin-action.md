@@ -269,6 +269,11 @@ use the same key. Tokens reach only agent commands, never setup commands.
 Runtime credential names and references are part of the Forge version; the host
 variable name is not recorded in the plan.
 
+Use `forge validate --host --experiment …` to install setup and check native MCP
+initialization and tool discovery from a disposable runtime. It requires a
+`--credential-env STRIPE_API_KEY` grant, makes no model or MCP tool calls, and
+reports model auth as untested. Ordinary `validate` remains credential-free.
+
 A missing server, non-HTTP transport, manifest MCP override, or unsupported auth
 source fails setup. Custom MCP config paths, OAuth, and host login passthrough
 are unsupported.

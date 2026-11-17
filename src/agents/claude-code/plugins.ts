@@ -66,6 +66,31 @@ export function createClaudePluginInstaller(
 
   return Object.freeze({
     supportsMcpBearerAuth: true as const,
+    async checkMcp({
+      receipt,
+      servers,
+      commands,
+      signal,
+    }: Parameters<NonNullable<AgentPluginInstaller['checkMcp']>>[0]) {
+      const result = await commands.run([executable, 'mcp', 'list'], {
+        signal,
+        timeoutMs: 90_000,
+        maxOutputBytes: 1024 * 1024,
+      });
+      if (result.exitCode !== 0)
+        throw new Error('Claude MCP readiness command failed.');
+      const pluginName = receipt.native_plugin_id.split('@')[0];
+      for (const server of servers) {
+        const prefix = `plugin:${pluginName}:${server}: `;
+        const lines = result.stdout
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith(prefix));
+        if (lines.length !== 1 || !lines[0]?.endsWith(' - ✔ Connected'))
+          throw new Error(
+            `Claude MCP server ${server} did not connect and discover tools.`,
+          );
+      }
+    },
     preflight(
       distribution: PluginSelectionV1,
       context: AgentPluginPreflightContext,

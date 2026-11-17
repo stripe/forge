@@ -686,12 +686,14 @@ describe('Forge CLI', () => {
       ['validate', '--experiment', fixture.experimentPath, '--host'],
       {
         detectDockerPlatform: async () => 'linux/arm64',
-        validateDockerHost: async ({ platform }) => {
-          validatedPlatforms.push(platform);
-          return {
-            platform,
-            imageId: `sha256:${'a'.repeat(64)}`,
-          };
+        engine: {
+          ...defaultForgeEngine,
+          async validateRuntime(requests) {
+            validatedPlatforms.push(
+              ...requests.map(({ plan }) => plan.runtime.platform),
+            );
+            return [];
+          },
         },
         stdout: (text) => {
           stdout += text;
@@ -707,9 +709,74 @@ describe('Forge CLI', () => {
     assert.deepEqual(validatedPlatforms, ['linux/arm64']);
     assert.deepEqual(JSON.parse(stdout).host, {
       docker_platform: 'linux/arm64',
-      image_id: `sha256:${'a'.repeat(64)}`,
+      checks: [],
       runtime_platform: 'linux/arm64',
     });
+  });
+
+  it('resolves explicit credential grants for host readiness only after finalization', async () => {
+    const fixture = await createBenchmarkFixture();
+    let resolved: string | undefined;
+    let stderr = '';
+    const exitCode = await runCli(
+      [
+        'validate',
+        '--experiment',
+        fixture.experimentPath,
+        '--host',
+        '--credential-env',
+        'mcp.key=MCP_HOST_KEY',
+      ],
+      {
+        environment: { MCP_HOST_KEY: 'host-secret' },
+        detectDockerPlatform: async () => 'linux/amd64',
+        engine: {
+          ...defaultForgeEngine,
+          async validateRuntime(requests, signal) {
+            resolved =
+              await requests[0]!.composition.credentialResolver.resolve(
+                credentialReference('mcp.key'),
+                {
+                  runId: 'readiness',
+                  purpose: 'forge-eval',
+                  signal: signal ?? new AbortController().signal,
+                },
+              );
+            return [];
+          },
+        },
+        stdout: () => undefined,
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
+    );
+    assert.equal(exitCode, 0, stderr);
+    assert.equal(resolved, 'host-secret');
+  });
+
+  it('accepts credential grants for validation only with --host', async () => {
+    const fixture = await createBenchmarkFixture();
+    let stderr = '';
+    const exitCode = await runCli(
+      [
+        'validate',
+        '--experiment',
+        fixture.experimentPath,
+        '--credential-env',
+        'mcp.key=MCP_HOST_KEY',
+      ],
+      {
+        stdout: () => undefined,
+        stderr: (text) => {
+          stderr += text;
+        },
+      },
+    );
+    assert.equal(exitCode, 2, stderr);
+    assert.ok(
+      stderr.includes('--credential-env is not valid for this command'),
+    );
   });
 
   it('does not build the host image when pure preflight fails', async () => {
@@ -728,9 +795,12 @@ describe('Forge CLI', () => {
       ['validate', '--experiment', fixture.experimentPath, '--host'],
       {
         detectDockerPlatform: async () => 'linux/arm64',
-        validateDockerHost: async ({ platform }) => {
-          hostValidationCalled = true;
-          return { platform, imageId: `sha256:${'a'.repeat(64)}` };
+        engine: {
+          ...defaultForgeEngine,
+          async validateRuntime() {
+            hostValidationCalled = true;
+            return [];
+          },
         },
         stdout: () => undefined,
         stderr: (text) => {
@@ -944,6 +1014,7 @@ describe('Forge CLI', () => {
       ['plan', '--experiment', fixture.experimentPath],
       {
         engine,
+        environment: { CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1' },
         stdout: (text) => {
           stdout += text;
         },
@@ -958,6 +1029,7 @@ describe('Forge CLI', () => {
     {
       const actual = JSON.parse(stdout);
       assert.ok(actual);
+      assert.equal(actual.agent.disable_experimental_betas, true);
       assert.deepEqual(
         actual.setup.map((item: { uses: string; with: { name: string } }) => ({
           uses: item.uses,
