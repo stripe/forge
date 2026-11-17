@@ -2,17 +2,23 @@ import {
   DEFAULT_REQUIREMENT_LEVEL,
   type JudgingCriterionInputV1,
 } from '../model/types.ts';
-
 import type {
   CheckResultV1,
+  CriterionEvidenceWarningV1,
   CriterionResultV1,
   EvaluationResultV1,
 } from '../results/index.ts';
+import {
+  boundCriterionEvidenceWarnings,
+  UNKNOWN_EVIDENCE_WARNINGS,
+} from './criterionEvidence.ts';
 
 /** Use a criterion-ratio score and gate a clean pass on scored checks. */
 export function scoreEvaluation(
   criteria: readonly CriterionResultV1[],
   checks: readonly CheckResultV1[],
+  /** The capture status the judge saw; recorded when any criterion refers to it. */
+  evidenceWarnings?: readonly CriterionEvidenceWarningV1[],
 ): EvaluationResultV1 {
   const included = criteria.filter(
     (criterion) => criterion.requirement_level !== 'OPTIONAL',
@@ -51,15 +57,37 @@ export function scoreEvaluation(
   }
 
   return {
+    ...(evidenceWarnings === undefined &&
+    !criteria.some((criterion) => criterion.evidence_warnings_ref !== undefined)
+      ? {}
+      : {
+          evidence_warnings: boundCriterionEvidenceWarnings(
+            evidenceWarnings ?? UNKNOWN_EVIDENCE_WARNINGS,
+          ),
+        }),
     score,
     status,
     judging_criteria_passed: criteriaPassed,
     judging_criteria_total: criteriaTotal,
     judging_criteria_errored: criteriaErrored,
-    judging_criteria: criteria.map((criterion) =>
+    judging_criteria: criteria.map((criterion): CriterionResultV1 =>
       criterion.passed === null
         ? { ...criterion, error: { ...criterion.error } }
-        : { ...criterion },
+        : {
+            ...criterion,
+            ...(criterion.decision === undefined
+              ? {}
+              : {
+                  decision: {
+                    ...criterion.decision,
+                    probabilities: { ...criterion.decision.probabilities },
+                    thresholds: { ...criterion.decision.thresholds },
+                    candidates: criterion.decision.candidates.map(
+                      (candidate) => ({ ...candidate }),
+                    ),
+                  },
+                }),
+          },
     ),
     checks: checks.map((check) => ({
       ...check,
