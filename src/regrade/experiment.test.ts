@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
+import { credentialReference } from '../contracts/credentials.ts';
 import { parseExperimentRunReport } from '../experimentReport.ts';
 import {
   createScriptedCompletionProvider,
@@ -216,6 +217,55 @@ describe('regradeExperimentRun', () => {
       /outside the source experiment run/,
     );
     assert.equal(scripted.scripted.calls.length, 0);
+  });
+
+  it.each([
+    ['provider preflight', 'preflight'],
+    ['credential resolver', 'resolver'],
+  ] as const)('does not persist a credential from a failing %s', async (_name, failing) => {
+    const root = await temporaryRoot('forge-regrade-exp-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const output = path.join(root, 'regrade');
+    const key = 'synthetic-judge-key-4f9c2a71';
+    const scripted = createScriptedCompletionProvider({
+      id: 'anthropic',
+      responses: [ORIGINAL_JUDGMENT],
+      requirements: {
+        credentials: { token: { reference: credentialReference('judge.key') } },
+      },
+      preflight: () => {
+        throw new Error(`Rejected key ${key}.`);
+      },
+    });
+    const staticResolver = createStaticCredentialResolver({
+      'judge.key': key,
+    });
+    const summary = await regradeExperimentRun(
+      {
+        experimentRun: source.experimentLocation,
+        judge: { provider: 'anthropic', model: 'claude-opus-4-6' },
+        output,
+      },
+      {
+        completionProviders: new Map([['anthropic', scripted.provider]]),
+        credentialResolver:
+          failing === 'preflight'
+            ? staticResolver
+            : {
+                async resolve() {
+                  throw new Error(`Vault refused ${key}.`);
+                },
+              },
+      },
+    );
+    assert.equal(summary.failed.length, 1);
+    assert.equal(scripted.calls.length, 0);
+    assert.doesNotMatch(JSON.stringify(summary), new RegExp(key));
+    assert.doesNotMatch(
+      await fs.readFile(path.join(output, 'regrade.json'), 'utf8'),
+      new RegExp(key),
+    );
   });
 
   it('rejects an existing output/runs symlink into the source before any work', async () => {

@@ -15,6 +15,7 @@ import {
 import { renderRecordedJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import {
   completionBindingFor,
+  type PreparedCompletionRuntime,
   prepareCompletionRuntime,
 } from '../execution/completionRuntime.ts';
 import { sha256Digest } from '../model/hashes.ts';
@@ -125,18 +126,27 @@ export async function regradeCompletedRun(
     forgeVersion: result.forge.version,
   });
 
-  const completions = await prepareCompletionRuntime({
-    runId: result.run_id,
-    bindings: [
-      completionBindingFor(
-        dependencies.completionProviders,
-        'judge',
-        input.judge,
-      ),
-    ],
-    credentialResolver: dependencies.credentialResolver,
-    signal,
-  });
+  const binding = completionBindingFor(
+    dependencies.completionProviders,
+    'judge',
+    input.judge,
+  );
+  let completions: PreparedCompletionRuntime;
+  try {
+    completions = await prepareCompletionRuntime({
+      runId: result.run_id,
+      bindings: [binding],
+      credentialResolver: dependencies.credentialResolver,
+      signal,
+    });
+  } catch {
+    signal.throwIfAborted();
+    // Provider preflight and credential resolvers receive resolved secrets, and their errors are not
+    // redacted before this point, so only a fixed message may leave this boundary (as in execution).
+    throw new Error(
+      'Forge could not prepare the completion provider required by this regrade.',
+    );
+  }
   const criteria = await judgeCriteria(
     { ...judgeInputFromSavedRun({ plan, trajectory, judgeEvidence }), signal },
     async (request) =>
