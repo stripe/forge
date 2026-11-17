@@ -602,10 +602,37 @@ describe('runConversation', () => {
       assert.equal(result.failure?.attempts, attempts);
       assert.equal(completion.calls.length, attempts);
       assert.equal(result.avaAudit.needs, null);
-      assert.equal(result.avaAudit.decisions[0]!.message, '');
-      assert.equal(result.avaAudit.decisions[0]!.codingAgentInvoked, false);
+      assert.deepEqual(result.avaAudit.decisions[0], {
+        sequence: 1,
+        afterAgentTurn: null,
+        message: '',
+        source: 'configured_initial_prompt',
+        stop: true,
+        remainingNeedIds: null,
+        focusNeedId: null,
+        codingAgentInvoked: false,
+        error: result.failure,
+      });
     });
   }
+
+  it('labels a failed generated opening as generated', async () => {
+    const completion = completions(new Error('Completion unavailable.'));
+    const signal = new AbortController().signal;
+    const result = await runConversation({
+      session: session([]).value,
+      ava: new AvaRolePlayer(
+        { task: 'Do the work', signal },
+        completion.invoke,
+        noRetryWait,
+      ),
+      maxTurns: 3,
+      signal,
+    });
+
+    assert.equal(result.stopReason, 'role_player_error');
+    assert.equal(result.avaAudit.decisions[0]!.source, 'generated');
+  });
 
   it('preserves configured stop-sentinel behavior and validates completed turns', async () => {
     const completion = completions(new Error('Ava must not be called.'));

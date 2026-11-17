@@ -397,7 +397,10 @@ export class AvaRolePlayer {
       },
     );
     if (outcome.ok) return outcome.value;
-    return this.#errorTurn(finalError!);
+    return this.#errorTurn(
+      finalError!,
+      configuredOpening ? 'configured_initial_prompt' : 'generated',
+    );
   }
 
   #initializeFromResponse(raw: string, configuredOpening: boolean): AvaTurn {
@@ -483,7 +486,7 @@ export class AvaRolePlayer {
     };
   }
 
-  #errorTurn(error: AvaError): AvaTurn {
+  #errorTurn(error: AvaError, source: AvaTurn['source']): AvaTurn {
     return {
       message: '',
       stop: true,
@@ -491,7 +494,7 @@ export class AvaRolePlayer {
         this.#remainingNeedIds === undefined ? null : this.#remainingNeeds(),
       needs: this.#needs ?? null,
       focusNeedId: null,
-      source: 'generated',
+      source,
       error,
     };
   }

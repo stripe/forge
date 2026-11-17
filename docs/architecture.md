@@ -1043,6 +1043,9 @@ trajectory and records a null agent session identity.
 
 Exhausted decisions record a final `message` alongside the error type, attempt
 count, and summary explanation in `interaction.json` and `result.json`.
+A failure before a configured opening (needs-only initialization) is recorded
+with source `configured_initial_prompt` and an empty message, because the
+authored opening was never sent; other failures record source `generated`.
 Parse messages identify invalid JSON, the first fixed-schema path/category,
 or the specific Ava format rule violated (such as a list or code fence).
 They never include rejected responses, received values, or unknown keys.
