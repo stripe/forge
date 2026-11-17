@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { z } from 'zod';
 import { parseAtifTrajectory } from '../atif/index.ts';
 import type { AtifTrajectoryV1_8 } from '../atif/types.ts';
 import type { CompletionProviderCollection } from '../contracts/composition.ts';
@@ -21,14 +22,24 @@ import {
 import { assertJudgePromptWillRemainUnchanged } from '../execution/judgePrompt.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.ts';
-import { parseEvaluationResult, parseJudgeEvidence } from '../results/parse.ts';
+import {
+  completionCallSummarySchema,
+  evaluationResultSchema,
+  parseJudgeEvidence,
+} from '../results/parse.ts';
 import type {
   CompletionCallSummaryV1,
   EvaluationResultV1,
   JudgeEvidenceV1,
   RunResultV1,
 } from '../results/types.ts';
-import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
+import { serializeCanonicalJson } from '../serialization.ts';
+import {
+  assertCompatibleForgeVersion,
+  FORGE_BUILD_IDENTITY,
+  type ForgeBuildIdentity,
+  parseForgeBuildIdentity,
+} from '../version.ts';
 
 export const REGRADE_RESULT_FORMAT = 'forge-regrade-result-v1' as const;
 
@@ -50,6 +61,109 @@ export interface RegradeResultV1 {
   readonly completion_calls: readonly CompletionCallSummaryV1[];
   readonly regraded_at: string;
   readonly forge: ForgeBuildIdentity;
+}
+
+/** Upper bound on a saved regrade file, as for other persisted scored artifacts. */
+export const MAX_REGRADE_RESULT_BYTES = 16 * 1024 * 1024;
+
+const sha256 = z.string().regex(/^sha256:[0-9a-f]{64}$/);
+const modelRef = z
+  .object({
+    provider: z.string().min(1).max(256),
+    model: z.string().min(1).max(256),
+  })
+  .strict();
+const regradeResultSchema = z
+  .object({
+    format: z.literal(REGRADE_RESULT_FORMAT),
+    run_id: z.string().min(1).max(128),
+    judge: modelRef,
+    source: z
+      .object({
+        result_sha256: sha256,
+        judge_evidence_sha256: sha256,
+        original_judge: modelRef.nullable(),
+        original_evaluation: z
+          .object({
+            status: z.enum(['passed', 'partial', 'failed', 'judge_error']),
+            score: z.number().finite().min(0).max(1).nullable(),
+          })
+          .strict(),
+      })
+      .strict(),
+    evaluation: evaluationResultSchema,
+    completion_calls: z.array(completionCallSummarySchema).max(10_000),
+    regraded_at: z.string().datetime({ offset: true }),
+    forge: z.unknown(),
+  })
+  .strict();
+
+/** The verified committed run a regrade is bound to. */
+export interface RegradeSource {
+  readonly result: RunResultV1;
+  /** Digest of the committed `result.json` bytes. */
+  readonly resultSha256: string;
+}
+
+/**
+ * The one strict reader of a persisted regrade: exact format, compatible
+ * Forge producer, the evaluation validator committed results use, and
+ * criteria, checks and digests bound to the verified source run. Fresh
+ * regrades pass through it before they are written, so saved and fresh
+ * results obey the same contract. Callers bound the input size first
+ * (`MAX_REGRADE_RESULT_BYTES`).
+ */
+export function parseRegradeResult(
+  input: unknown,
+  source: RegradeSource,
+): RegradeResultV1 {
+  const parsed = regradeResultSchema.parse(input);
+  const forge = parseForgeBuildIdentity(parsed.forge);
+  assertCompatibleForgeVersion(forge.version);
+  const { result } = source;
+  const judgeEvidence = result.artifacts.find(
+    (entry) => entry.path === 'judge-evidence.json',
+  );
+  const same = (left: unknown, right: unknown) =>
+    serializeCanonicalJson(left) === serializeCanonicalJson(right);
+  const criterionIdentity = (criterion: {
+    label?: string | undefined;
+    requirement_level?: string | undefined;
+    criterion: string;
+  }) => ({
+    criterion: criterion.criterion,
+    ...(criterion.label === undefined ? {} : { label: criterion.label }),
+    ...(criterion.requirement_level === undefined
+      ? {}
+      : { requirement_level: criterion.requirement_level }),
+  });
+  if (
+    parsed.run_id !== result.run_id ||
+    parsed.source.result_sha256 !== source.resultSha256 ||
+    parsed.source.judge_evidence_sha256 !== judgeEvidence?.sha256 ||
+    !same(parsed.source.original_evaluation, {
+      status: result.evaluation.status,
+      score: result.evaluation.score,
+    })
+  )
+    throw new Error('A saved regrade does not belong to this source run.');
+  if (
+    !same(
+      parsed.evaluation.judging_criteria.map(criterionIdentity),
+      result.evaluation.judging_criteria.map(criterionIdentity),
+    ) ||
+    !same(parsed.evaluation.checks, result.evaluation.checks)
+  )
+    throw new Error(
+      'A saved regrade has criteria or checks that differ from its source run.',
+    );
+  if (
+    parsed.completion_calls.some(
+      (call) => call.purpose !== 'judge' || call.model !== parsed.judge.model,
+    )
+  )
+    throw new Error('A saved regrade has completion calls from another judge.');
+  return { ...parsed, forge } as RegradeResultV1;
 }
 
 /** Host capabilities a regrade needs; no runtime, agents, or artifact store. */
@@ -164,28 +278,32 @@ export async function regradeCompletedRun(
     },
   );
   const evaluation = scoreEvaluation(criteria, result.evaluation.checks);
-  // The same strict validator committed results pass through.
-  parseEvaluationResult(evaluation);
-  return Object.freeze({
-    format: REGRADE_RESULT_FORMAT,
-    run_id: result.run_id,
-    judge: Object.freeze({ ...input.judge }),
-    source: Object.freeze({
-      result_sha256: sha256Digest(
-        await fs.readFile(path.join(completed.location, 'result.json')),
-      ),
-      judge_evidence_sha256: sha256Digest(judgeEvidenceBody),
-      original_judge: plan.evaluation.judge ?? null,
-      original_evaluation: Object.freeze({
-        status: result.evaluation.status,
-        score: result.evaluation.score,
-      }),
-    }),
-    evaluation,
-    completion_calls: completions.calls,
-    regraded_at: (input.now ?? (() => new Date()))().toISOString(),
-    forge: FORGE_BUILD_IDENTITY,
-  });
+  const resultSha256 = sha256Digest(
+    await fs.readFile(path.join(completed.location, 'result.json')),
+  );
+  return Object.freeze(
+    parseRegradeResult(
+      {
+        format: REGRADE_RESULT_FORMAT,
+        run_id: result.run_id,
+        judge: { ...input.judge },
+        source: {
+          result_sha256: resultSha256,
+          judge_evidence_sha256: sha256Digest(judgeEvidenceBody),
+          original_judge: plan.evaluation.judge ?? null,
+          original_evaluation: {
+            status: result.evaluation.status,
+            score: result.evaluation.score,
+          },
+        },
+        evaluation,
+        completion_calls: completions.calls,
+        regraded_at: (input.now ?? (() => new Date()))().toISOString(),
+        forge: FORGE_BUILD_IDENTITY,
+      },
+      { result, resultSha256 },
+    ),
+  );
 }
 
 /** Read a claimed artifact and re-check its digest after verification. */

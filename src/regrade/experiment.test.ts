@@ -42,6 +42,17 @@ function dependencies(responses: string[]) {
   };
 }
 
+/** The parts of a saved regrade the corruption cases edit. */
+interface SavedRegrade {
+  forge?: { version: string };
+  extra?: boolean;
+  source: { result_sha256: string };
+  evaluation: {
+    judging_criteria: { criterion: string }[] | null;
+    checks: { passed: unknown }[] | null;
+  };
+}
+
 describe('regradeExperimentRun', () => {
   it('regrades completed runs into a separate report and reuses them on rerun', async () => {
     const root = await temporaryRoot('forge-regrade-exp-');
@@ -266,6 +277,83 @@ describe('regradeExperimentRun', () => {
       await fs.readFile(path.join(output, 'regrade.json'), 'utf8'),
       new RegExp(key),
     );
+  });
+
+  it.each([
+    [
+      'a missing producer',
+      (saved: SavedRegrade) => {
+        delete saved.forge;
+      },
+    ],
+    [
+      'an incompatible producer',
+      (saved: SavedRegrade) => {
+        saved.forge!.version = '0.0.1';
+      },
+    ],
+    [
+      'an extra field',
+      (saved: SavedRegrade) => {
+        saved.extra = true;
+      },
+    ],
+    [
+      'a criterion changed from the source',
+      (saved: SavedRegrade) => {
+        saved.evaluation.judging_criteria![0]!.criterion =
+          'The release summary must say something else.';
+      },
+    ],
+    [
+      'a wrongly typed check result',
+      (saved: SavedRegrade) => {
+        saved.evaluation.checks![0]!.passed = 'false';
+      },
+    ],
+    [
+      'checks that differ from the source',
+      (saved: SavedRegrade) => {
+        saved.evaluation.checks = [];
+      },
+    ],
+    [
+      'null evaluation arrays',
+      (saved: SavedRegrade) => {
+        saved.evaluation.judging_criteria = null;
+        saved.evaluation.checks = null;
+      },
+    ],
+    [
+      'a different source result',
+      (saved: SavedRegrade) => {
+        saved.source.result_sha256 = `sha256:${'0'.repeat(64)}`;
+      },
+    ],
+  ])('fails only the run whose saved regrade has %s, without judge calls', async (_name, mutate) => {
+    const root = await temporaryRoot('forge-regrade-exp-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const output = path.join(root, 'regrade');
+    const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
+    await regradeExperimentRun(
+      { experimentRun: source.experimentLocation, judge, output },
+      dependencies([failingJudgment]).dependencies,
+    );
+    const file = path.join(output, 'runs', 'regrade-source.json');
+    const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.ok(saved.evaluation.checks!.length > 0);
+    mutate(saved);
+    await fs.writeFile(file, JSON.stringify(saved));
+    const rerun = dependencies([failingJudgment]);
+    const summary = await regradeExperimentRun(
+      { experimentRun: source.experimentLocation, judge, output },
+      rerun.dependencies,
+    );
+    assert.equal(summary.reused, 0);
+    assert.equal(summary.failed.length, 1);
+    assert.equal(summary.failed[0]!.run_id, 'regrade-source');
+    assert.equal(rerun.scripted.calls.length, 0);
   });
 
   it('rejects an existing output/runs symlink into the source before any work', async () => {

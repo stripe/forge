@@ -13,7 +13,8 @@ import { sha256Digest } from '../model/hashes.ts';
 import type { ModelRefV1 } from '../model/types.ts';
 import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
 import {
-  REGRADE_RESULT_FORMAT,
+  MAX_REGRADE_RESULT_BYTES,
+  parseRegradeResult,
   type RegradeDependencies,
   type RegradeResultV1,
   regradeCompletedRun,
@@ -162,19 +163,21 @@ export async function regradeExperimentRun(
     ): Promise<RegradeOutcome> => {
       const file = path.join(output, 'runs', `${runId}.json`);
       try {
-        const resultSha256 = sha256Digest(
-          await fs.readFile(path.join(location, 'result.json')),
-        );
-        const existing = await readExistingRegrade(file);
-        if (existing !== undefined) {
+        const existingBody = await readExistingRegrade(file);
+        if (existingBody !== undefined) {
+          const verified = await engine.verifyCompletedRun(location);
+          const existing = parseRegradeResult(JSON.parse(existingBody), {
+            result: verified.result,
+            resultSha256: sha256Digest(
+              await fs.readFile(path.join(location, 'result.json')),
+            ),
+          });
           if (
-            existing.run_id !== runId ||
             existing.judge.provider !== input.judge.provider ||
-            existing.judge.model !== input.judge.model ||
-            existing.source.result_sha256 !== resultSha256
+            existing.judge.model !== input.judge.model
           )
             throw new Error(
-              'An existing regrade in the output uses a different judge or result.',
+              'An existing regrade in the output uses a different judge.',
             );
           return { kind: 'reused', regrade: existing };
         }
@@ -362,20 +365,16 @@ function isWithin(parent: string, candidate: string): boolean {
   );
 }
 
-async function readExistingRegrade(
-  file: string,
-): Promise<RegradeResultV1 | undefined> {
-  let body: string;
+/** The bounded text of a saved regrade, or `undefined` when none exists. */
+async function readExistingRegrade(file: string): Promise<string | undefined> {
   try {
-    body = await fs.readFile(file, 'utf8');
+    if ((await fs.stat(file)).size > MAX_REGRADE_RESULT_BYTES)
+      throw new Error('An existing regrade file exceeds its size limit.');
+    return await fs.readFile(file, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
-  const value = JSON.parse(body) as RegradeResultV1;
-  if (value.format !== REGRADE_RESULT_FORMAT)
-    throw new Error('An existing regrade file has an unknown format.');
-  return value;
 }
 
 async function writeAtomic(file: string, body: string): Promise<void> {
