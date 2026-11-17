@@ -8,6 +8,10 @@ import {
   type CredentialReference,
   credentialReference,
 } from '../../contracts/credentials.ts';
+import {
+  createProviderLookup,
+  resolveProvider,
+} from '../../contracts/providers.ts';
 import { FORGE_CODEX_VERSION } from '../../runtime/docker/assets.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import { loadCodexEvidence, loadCodexNativeArtifact } from './evidence.ts';
@@ -95,6 +99,10 @@ export function createCodexAdapter(
     'analytics.enabled=false',
     'check_for_update_on_startup=false',
   ].flatMap((value) => ['-c', value]);
+  // The one provider name this adapter serves, through the shared lookup.
+  const providers = createProviderLookup({
+    [provider]: { integration: 'openai', baseUrl, credential },
+  });
   const requirements = (selection: {
     adapter: string;
     provider: string;
@@ -104,11 +112,10 @@ export function createCodexAdapter(
     if (selection.model_profile !== undefined) {
       throw new TypeError('model_profile is not supported by Codex.');
     }
-    if (selection.adapter !== id || selection.provider !== provider) {
-      throw new TypeError(
-        'Codex adapter does not match the selected adapter/provider.',
-      );
+    if (selection.adapter !== id) {
+      throw new TypeError('Codex adapter does not match the selected adapter.');
     }
+    resolveProvider(providers, 'Codex', selection.provider, ['openai']);
     if (
       selection.hook_trust !== undefined &&
       !['native', 'automation'].includes(selection.hook_trust)

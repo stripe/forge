@@ -357,6 +357,30 @@ describe('Claude Code adapter', () => {
     assert.ok(!('ANTHROPIC_API_KEY' in requirements.environment.credentials));
   });
 
+  it('serves only its configured provider name', () => {
+    const adapter = createClaudeCodeAdapter({
+      provider: 'anthropic-compatible',
+    });
+    assert.throws(
+      () =>
+        adapter.requirements({
+          adapter: 'claude-code',
+          provider: 'anthropic',
+          model: 'claude-test',
+        }),
+      /Provider "anthropic" is not configured for Claude Code; configured providers: anthropic-compatible\./,
+    );
+    assert.throws(
+      () =>
+        adapter.requirements({
+          adapter: 'other-agent',
+          provider: 'anthropic-compatible',
+          model: 'claude-test',
+        }),
+      /does not match the selected adapter/,
+    );
+  });
+
   for (const { description, baseUrl } of [
     { description: 'empty', baseUrl: '' },
     { description: 'relative', baseUrl: 'relative/path' },

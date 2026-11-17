@@ -2107,6 +2107,47 @@ describe('Forge CLI', () => {
         );
       }
     }
+    const named = await createDefaultCliComposition({
+      datasetRoot: fixture.datasetRoot,
+      resultsRoot: path.join(fixture.root, 'results'),
+      environment: {
+        OPENCODE_PROVIDER_OPENROUTER_BASE_URL: 'https://openrouter.example/v1',
+        OPENCODE_PROVIDER_OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+    const namedRequirements = named.agents.get('opencode')!.requirements({
+      adapter: 'opencode',
+      provider: 'openrouter',
+      model: 'gateway/model',
+      model_profile: {
+        limit: { context: 32000, output: 4000 },
+        reasoning: false,
+        temperature: true,
+        attachment: false,
+      },
+    });
+    assert.equal(
+      JSON.parse(
+        namedRequirements.environment.variables!.OPENCODE_CONFIG_CONTENT!,
+      ).provider.forge.options.baseURL,
+      'https://openrouter.example/v1',
+    );
+    assert.equal(
+      namedRequirements.environment.credentials!.OPENCODE_API_KEY!.reference,
+      'opencode.provider.openrouter.api-key',
+    );
+    // The host key is never inferred; it needs an explicit grant.
+    await assert.rejects(
+      named.credentialResolver.resolve(
+        credentialReference('opencode.provider.openrouter.api-key'),
+        {
+          runId: 'opencode-cli',
+          purpose: 'agent',
+          signal: new AbortController().signal,
+        },
+      ),
+      /--credential-env OPENCODE_PROVIDER_OPENROUTER_API_KEY/,
+    );
     const composition = await createDefaultCliComposition({
       datasetRoot: fixture.datasetRoot,
       resultsRoot: path.join(fixture.root, 'results'),
@@ -2193,6 +2234,133 @@ describe('Forge CLI', () => {
         );
       }
     }
+  });
+
+  describe('named OpenCode providers', () => {
+    async function runProviders(options: {
+      providers: readonly string[];
+      environment: Record<string, string>;
+      grants: readonly string[];
+    }) {
+      const fixture = await createBenchmarkFixture({
+        agent: 'opencode',
+        opencodeProviders: options.providers,
+      });
+      const execution = createCredentialExecution();
+      const reads: string[] = [];
+      const environment: Record<string, string | undefined> = {};
+      for (const [name, value] of Object.entries(options.environment)) {
+        Object.defineProperty(environment, name, {
+          enumerable: true,
+          get() {
+            reads.push(name);
+            return value;
+          },
+        });
+      }
+      let stderr = '';
+      const exitCode = await runCli(
+        [
+          'run',
+          '--experiment',
+          fixture.experimentPath,
+          ...options.grants.flatMap((grant) => ['--credential-env', grant]),
+        ],
+        {
+          environment,
+          stdout: () => undefined,
+          stderr: (text) => {
+            stderr += text;
+          },
+          execute: execution.execute,
+        },
+      );
+      return { exitCode, stderr, reads, execution };
+    }
+
+    it('binds a bare provider grant to the OPENCODE_API_KEY runtime slot', async () => {
+      const result = await runProviders({
+        providers: ['openrouter'],
+        environment: {
+          OPENCODE_PROVIDER_OPENROUTER_BASE_URL:
+            'https://openrouter.example/v1',
+          OPENCODE_PROVIDER_OPENROUTER_API_KEY: 'openrouter-key',
+          OPENCODE_API_KEY: 'default-key',
+        },
+        grants: ['OPENCODE_PROVIDER_OPENROUTER_API_KEY'],
+      });
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.ok(!result.reads.includes('OPENCODE_API_KEY'));
+      assert.deepEqual(
+        result.execution.runtime.runs[0]!.input.environment.credentials,
+        { OPENCODE_API_KEY: { value: 'openrouter-key', scopes: ['agent'] } },
+      );
+    });
+
+    it('recommends the provider grant when it is missing or has no value', async () => {
+      const environment = {
+        OPENCODE_PROVIDER_OPENROUTER_BASE_URL: 'https://openrouter.example/v1',
+      };
+      const ungranted = await runProviders({
+        providers: ['openrouter'],
+        environment,
+        grants: [],
+      });
+      assert.equal(ungranted.exitCode, 1);
+      assert.match(
+        ungranted.stderr,
+        /--credential-env OPENCODE_PROVIDER_OPENROUTER_API_KEY/,
+      );
+      assert.equal(ungranted.execution.runtime.runs.length, 0);
+
+      const unset = await runProviders({
+        providers: ['openrouter'],
+        environment,
+        grants: ['OPENCODE_PROVIDER_OPENROUTER_API_KEY'],
+      });
+      assert.equal(unset.exitCode, 1);
+      assert.match(unset.stderr, /Set OPENCODE_PROVIDER_OPENROUTER_API_KEY/);
+      assert.doesNotMatch(unset.stderr, /Set OPENCODE_API_KEY/);
+    });
+
+    it('gives each provider its own key', async () => {
+      const result = await runProviders({
+        providers: ['openrouter', 'other'],
+        environment: {
+          OPENCODE_PROVIDER_OPENROUTER_BASE_URL:
+            'https://openrouter.example/v1',
+          OPENCODE_PROVIDER_OPENROUTER_API_KEY: 'openrouter-key',
+          OPENCODE_PROVIDER_OTHER_BASE_URL: 'https://other.example/v1',
+          OPENCODE_PROVIDER_OTHER_API_KEY: 'other-key',
+        },
+        grants: [
+          'OPENCODE_PROVIDER_OPENROUTER_API_KEY',
+          'OPENCODE_PROVIDER_OTHER_API_KEY',
+        ],
+      });
+      assert.equal(result.exitCode, 0, result.stderr);
+      const values = result.execution.runtime.runs.map(
+        (run) => run.input.environment.credentials?.OPENCODE_API_KEY?.value,
+      );
+      assert.deepEqual([...values].sort(), ['openrouter-key', 'other-key']);
+    });
+
+    it('names the missing base URL variable before any credential read or allocation', async () => {
+      const result = await runProviders({
+        providers: ['openrouter'],
+        environment: {
+          OPENCODE_PROVIDER_OPENROUTER_API_KEY: 'openrouter-key',
+        },
+        grants: ['OPENCODE_PROVIDER_OPENROUTER_API_KEY'],
+      });
+      assert.equal(result.exitCode, 1);
+      assert.match(
+        result.stderr,
+        /Provider "openrouter" is not configured for OpenCode.*OPENCODE_PROVIDER_OPENROUTER_BASE_URL/,
+      );
+      assert.deepEqual(result.reads, []);
+      assert.equal(result.execution.runtime.runs.length, 0);
+    });
   });
 
   it('selects standard gateway authentication when ANTHROPIC_BASE_URL is set', async () => {
@@ -3665,6 +3833,8 @@ async function createBenchmarkFixture(
     actionBundles?: readonly SetupActionBundleReferenceV1[];
     withHostCompletions?: boolean;
     models?: ExperimentConfigV1['models'];
+    /** Provider names, one OpenCode agent arm each; defaults to openai-compatible. */
+    opencodeProviders?: readonly string[];
   } = {},
 ): Promise<{
   root: string;
@@ -3756,10 +3926,14 @@ matrix:
   cases: [cases/example.case.yaml]
   treatments: [baseline]
   agents:
-    - adapter: ${options.agent ?? 'claude-code'}
-      provider: ${options.agent === 'opencode' ? 'openai-compatible' : options.agent === 'codex' ? 'openai' : 'anthropic'}
+${(options.opencodeProviders ?? [undefined])
+  .map(
+    (provider) => `    - adapter: ${options.agent ?? 'claude-code'}
+      provider: ${provider ?? (options.agent === 'opencode' ? 'openai-compatible' : options.agent === 'codex' ? 'openai' : 'anthropic')}
       model: ${options.agent === 'opencode' ? 'gateway/test' : options.agent === 'codex' ? 'gpt-5.4' : 'claude-sonnet'}
-${options.agent === 'opencode' ? '      model_profile: {limit: {context: 32000, output: 4000}, reasoning: false, temperature: true, attachment: false}\n' : ''}  repetitions: ${options.repetitions ?? 1}
+${options.agent === 'opencode' ? '      model_profile: {limit: {context: 32000, output: 4000}, reasoning: false, temperature: true, attachment: false}\n' : ''}`,
+  )
+  .join('')}  repetitions: ${options.repetitions ?? 1}
   retries: 0
 limits:
   run_timeout_ms: 1800000

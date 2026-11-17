@@ -927,12 +927,31 @@ Forge ships these adapters:
   [Marketplace plugin treatments](plugin-action.md) for its scope.
 
 - **OpenCode** uses an explicit OpenAI-compatible Chat Completions endpoint and
-  API key. It runs the native `build` agent with automatic permission approval,
-  preserves prompts through a declared-state file supplied to stdin by a Node
+  API key, chosen by the selection's `provider` name. It runs the native
+  `build` agent with automatic permission approval, preserves prompts through a declared-state file supplied to stdin by a Node
   launcher, and resumes only the session ID observed on the first turn. Its
   XDG configuration, data, cache, prompts, and exports live under one declared
   `opencode-state` directory. Sharing, updates, and live model-catalog fetching
   are disabled; the main and small model are the selected gateway alias.
+
+An agent selection's `provider` names the specific service or logical route
+that serves the model, such as `openrouter` or `gateway-direct`; it is never a
+URL or credential. The host owns a `ProviderLookup` (`contracts/providers.ts`)
+that maps each name to a `ProviderConfiguration`: an API `integration`
+(`anthropic`, `openai`, or `openai-compatible`), a `baseUrl`, and a credential
+reference. The public defaults `anthropic`, `openai`, and `openai-compatible`
+are provider names whose integration is themselves. Each adapter resolves the
+selection's name during pure preflight and rejects an unknown name or an
+integration it cannot speak, naming only logical names. Claude Code requires
+`anthropic` and Codex requires `openai`; each serves its one configured
+provider name (the `provider` option, defaulting to its public name).
+OpenCode accepts any configured provider whose integration is
+`openai-compatible` (`providers` option). `provider` is already part of
+selection identity, plans, results, checkpoints, and report grouping, so
+distinct routes are distinct selections without another field. The plan records
+only the name; Forge does not capture the mapping, so the same name can reach
+different hosts on different machines. Completion providers for Ava and judging
+are configured separately.
 
 OpenCode requires `model_profile` on the experiment's agent selection during
 pure capability preflight. Its strict shape is
@@ -956,7 +975,7 @@ bundle's skills and MCP connection through generated native configuration.
 The adapter merges that fragment with its generated model config and restores
 the combined snapshot on every turn. See the [plugin contract](plugin-action.md)
 for source selection, authentication, supported bundle behavior, and installation
-receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`, `credential`, `id`,
+receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`, `providers`, `credential`, `id`,
 `executable`, `expectedVersion`, and logical `layout`
 options; the CLI supplies its endpoint and credential binding as documented
 in the [README](../README.md#opencode-setup).
@@ -1846,11 +1865,13 @@ The public CLI and built-in composition currently have these limits:
 - Claude Code, Codex, and experimental OpenCode are the built-in agents. Cursor and interactive human
   controllers are not included. Codex uses API-key execution, without ChatGPT
   login.
-- OpenCode currently accepts only `openai-compatible` Chat Completions.
-  Protocol compatibility alone does not establish model compatibility. Native
-  OpenRouter, OpenAI Responses, Anthropic, OAuth/subscription login, and remote
-  OpenCode servers are not supported; gateways can expose their own exact aliases
-  through Chat Completions.
+- OpenCode currently accepts only providers whose integration is
+  `openai-compatible` Chat Completions. Protocol compatibility alone does not
+  establish model compatibility. Native OpenAI Responses, Anthropic,
+  OAuth/subscription login, and remote OpenCode servers are not supported;
+  gateways and services such as OpenRouter are reached as named
+  `openai-compatible` providers. The CLI configures named providers only for
+  OpenCode; Claude Code and Codex serve a single configured provider name.
 - Multi-turn automation uses fixed Ava semantics. Anthropic and OpenAI are
   built-in host completion providers; other providers require an explicit
   [completion-provider implementation](#host-side-completion-providers) and

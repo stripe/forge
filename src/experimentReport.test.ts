@@ -164,6 +164,26 @@ describe('experiment run scorecards', () => {
     }
   });
 
+  it('keeps arms that differ only by provider name in separate score groups', () => {
+    const runs = [row(0), row(1)];
+    runs[0]!.selection.agent = {
+      adapter: 'opencode',
+      provider: 'openrouter',
+      model: 'gateway-code',
+      model_profile: OPEN_CODE_MODEL_PROFILE,
+    };
+    runs[1]!.selection.agent = {
+      ...runs[0]!.selection.agent,
+      provider: 'gateway-direct',
+    };
+    const report = build(runs);
+    assert.deepEqual(
+      report.cases.map(({ agent }) => agent.provider),
+      ['openrouter', 'gateway-direct'],
+    );
+    assert.deepEqual(parseExperimentRunReport(report), report);
+  });
+
   it('retains model profiles in checkpoints and report rows and separates their score groups', () => {
     const runs = [row(0), row(1)];
     runs[0]!.selection.agent = {

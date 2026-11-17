@@ -9,6 +9,10 @@ import {
   type CredentialReference,
   credentialReference,
 } from '../../contracts/credentials.ts';
+import {
+  createProviderLookup,
+  resolveProvider,
+} from '../../contracts/providers.ts';
 import { FORGE_CLAUDE_CODE_VERSION } from '../../runtime/docker/assets.ts';
 import { FORGE_VERSION } from '../../version.ts';
 import { loadClaudeEvidence, loadClaudeNativeArtifact } from './evidence.ts';
@@ -92,6 +96,14 @@ export function createClaudeCodeAdapter(
       'Claude configuration directory cannot be supplied as a credential.',
     );
   }
+  // The one provider name this adapter serves, through the shared lookup.
+  const providers = createProviderLookup({
+    [provider]: {
+      integration: 'anthropic',
+      ...(baseUrl === undefined ? {} : { baseUrl }),
+      credential,
+    },
+  });
   const requirements = (selection: {
     adapter: string;
     provider: string;
@@ -104,11 +116,14 @@ export function createClaudeCodeAdapter(
     if (selection.hook_trust !== undefined) {
       throw new TypeError('hook_trust is not supported by Claude Code.');
     }
-    if (selection.adapter !== id || selection.provider !== provider) {
+    if (selection.adapter !== id) {
       throw new TypeError(
-        'Claude adapter does not match the selected adapter/provider.',
+        'Claude adapter does not match the selected adapter.',
       );
     }
+    resolveProvider(providers, 'Claude Code', selection.provider, [
+      'anthropic',
+    ]);
     return {
       executables: [executable],
       environment: {
