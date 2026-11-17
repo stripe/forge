@@ -539,6 +539,8 @@ export async function executeEvalWithTestHooks(
                 truncated: entry.truncated,
               })),
               complete: safeWorkspace.complete,
+              // Recorded only when a bound was hit, so untruncated evidence keeps its exact bytes.
+              ...(safeWorkspace.truncated ? { truncated: true } : {}),
               warnings: safeWorkspace.warnings.map((warning) => ({
                 ...warning,
               })),

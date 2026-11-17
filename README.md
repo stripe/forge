@@ -641,6 +641,21 @@ derived snapshots and can be stale after interruption.
 See the [evidence and artifact architecture](docs/architecture.md#evidence-architecture)
 for verification, judge-visible projections, and fidelity limits.
 
+To find saved runs with no workspace text and an entry-limit warning, use
+optional `jq`:
+
+```sh
+find results/experiments -name judge-evidence.json -exec jq -r \
+  'select((.workspace.entries | length) == 0 and any(.workspace.warnings[]?; .code == "workspace_entry_limit_reached")) | input_filename' {} +
+```
+
+This query omits runs that hit the limit but kept some files. Drop the
+`(.workspace.entries | length) == 0 and` condition to find all entry-limit runs.
+Inspect their warnings before rerunning: shallow directories or other bounds
+can still leave no eligible text. Capturing missing text requires a new
+execution. Resume keeps completed scores, and regrade reuses saved evidence;
+neither can recover text that was not captured.
+
 When using Forge as a library, you can
 [supply your own Dockerfile](docs/architecture.md#custom-docker-images) while
 reusing its container lifecycle. The CLI uses the packaged image.

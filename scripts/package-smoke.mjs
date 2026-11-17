@@ -79,6 +79,14 @@ try {
       import packageMetadata from '@stripe/forge/package.json' with {type: 'json'};
 
       assert.equal(typeof forge.executeEval, 'function');
+      const listingWorkspace = testing.createMemoryWorkspace({
+        'node_modules/pkg/index.js': 'dependency', 'app.ts': 'source', 'z.ts': 'source',
+      }).readonly;
+      await assert.rejects(listingWorkspace.listFiles({maxEntries: 1, excludeDirectoryNames: ['node_modules']}), (error) => {
+        assert.ok(error instanceof forge.WorkspaceEntryLimitError);
+        assert.deepEqual(error.entries.map(({path}) => path), ['app.ts']);
+        return true;
+      });
       assert.equal(forge.FORGE_VERSION, packageMetadata.version);
       assert.deepEqual(forge.FORGE_BUILD_IDENTITY, ${JSON.stringify(packagedBuildIdentity)});
       assert.equal(Object.isFrozen(forge.FORGE_BUILD_IDENTITY), true);

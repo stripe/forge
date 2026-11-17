@@ -3,6 +3,8 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
+import { WorkspaceEntryLimitError } from '../contracts/runtime.ts';
+import { collectJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import { createOwnedWorkspace } from './workspace.ts';
 
 const roots: string[] = [];
@@ -16,6 +18,84 @@ afterEach(async () => {
 });
 
 describe('owned workspace', () => {
+  it('skips excluded directory trees before counting and keeps bounded partial evidence', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-listing-'));
+    roots.push(root);
+    const workspace = await createOwnedWorkspace(root);
+    for (const file of [
+      'node_modules/pkg/a.js',
+      'node_modules/pkg/b.js',
+      'node_modules/pkg/c.js',
+      'src/node_modules/nested/pkg.js',
+      'src/app.ts',
+      'src/view.ts',
+    ]) {
+      await workspace.writeFile(file, Buffer.from(file));
+    }
+    const options = { maxEntries: 3, excludeDirectoryNames: ['node_modules'] };
+    assert.deepEqual(
+      (await workspace.listFiles(options)).map(({ path }) => path),
+      ['src', 'src/app.ts', 'src/view.ts'],
+    );
+    assert.deepEqual(
+      await workspace.listFiles({ ...options, under: 'node_modules' }),
+      [],
+    );
+    const complete = await collectJudgeWorkspaceEvidence(workspace, {
+      maxEntries: 3,
+    });
+    assert.equal(complete.evidence.complete, true);
+    assert.deepEqual(
+      complete.evidence.entries.map(({ path }) => path),
+      ['src/app.ts', 'src/view.ts'],
+    );
+
+    await workspace.writeFile('src/z.ts', Buffer.from('beyond limit'));
+    await assert.rejects(workspace.listFiles(options), (error) => {
+      assert.ok(error instanceof WorkspaceEntryLimitError);
+      assert.equal(error.maxEntries, 3);
+      assert.deepEqual(
+        error.entries.map(({ path }) => path),
+        ['src', 'src/app.ts', 'src/view.ts'],
+      );
+      assert.ok(Object.isFrozen(error.entries));
+      assert.ok(error.entries.every(Object.isFrozen));
+      return true;
+    });
+    const partial = await collectJudgeWorkspaceEvidence(workspace, {
+      maxEntries: 3,
+    });
+    assert.deepEqual(
+      partial.evidence.entries.map(({ path }) => path),
+      ['src/app.ts', 'src/view.ts'],
+    );
+    assert.equal(partial.evidence.complete, false);
+    assert.equal(partial.evidence.truncated, true);
+    assert.match(
+      partial.renderedText,
+      /listing was truncated.*entry limit of 3/,
+    );
+    assert.doesNotMatch(partial.renderedText, /beyond limit/);
+  });
+
+  it('matches exact directory basenames and retains files and symlinks with excluded names', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-exclusions-'));
+    roots.push(root);
+    const workspace = await createOwnedWorkspace(root);
+    await workspace.writeFile('file-dir', Buffer.from('file'));
+    await workspace.writeFile('kept-dir/app.ts', Buffer.from('app'));
+    await workspace.writeFile('skip-dir/app.ts', Buffer.from('excluded'));
+    await fs.symlink('kept-dir', path.join(root, 'link-dir'));
+    assert.deepEqual(
+      (
+        await workspace.listFiles({
+          excludeDirectoryNames: ['file-dir', 'link-dir', 'kept', 'skip-dir'],
+        })
+      ).map(({ path }) => path),
+      ['file-dir', 'kept-dir', 'kept-dir/app.ts', 'link-dir'],
+    );
+  });
+
   it('writes exact bytes and exposes bounded inspection', async () => {
     const root = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-workspace-test-'),

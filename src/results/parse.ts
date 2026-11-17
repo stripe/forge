@@ -459,6 +459,7 @@ const judgeEvidenceSchema = z
           )
           .max(10_000),
         complete: z.boolean(),
+        truncated: z.boolean().optional(),
         warnings: z
           .array(
             z
