@@ -1041,6 +1041,80 @@ describe('local artifact store', () => {
     );
   });
 
+  it('rejects completion-call totals that disagree with the retained records', () => {
+    const result = resultFor([]);
+    const call = (sequence: number, extra: object = {}) => ({
+      sequence,
+      purpose: 'judge',
+      provider: 'test-provider',
+      provider_version: '1',
+      model: 'judge-model',
+      status: 'failed',
+      stop_reason: null,
+      input_tokens: null,
+      output_tokens: null,
+      cached_tokens: null,
+      cost_usd: null,
+      error_code: 'http_error',
+      ...extra,
+    });
+    const limited = {
+      retry: { decision: 'rate_limit_retry', wait_ms: 2000 },
+    };
+    const totals = (extra: object = {}) => ({
+      calls: 2,
+      failed: 2,
+      omitted: 0,
+      rate_limit_wait_ms: 2000,
+      ...extra,
+    });
+    const parse = (completion_call_totals: object, calls = [call(1, limited), call(2)]) =>
+      parseRunResult({
+        ...result,
+        completion_calls: calls,
+        completion_call_totals,
+      });
+    parse(totals());
+    for (const invalid of [
+      totals({ calls: 3 }),
+      totals({ calls: 1, failed: 1 }),
+      totals({ failed: 3 }),
+      totals({ failed: 1 }),
+      totals({ rate_limit_wait_ms: 1999 }),
+    ]) {
+      assert.throws(
+        () => parse(invalid),
+        /Completion-call totals disagree with retained records\./,
+      );
+    }
+
+    // At the retention cap the omitted calls are counted, not retained.
+    const retained = Array.from({ length: 1024 }, (_, index) =>
+      call(index + 1, limited),
+    );
+    const atCap = parse(
+      {
+        calls: 1026,
+        failed: 1026,
+        omitted: 2,
+        rate_limit_wait_ms: 1026 * 2000,
+      },
+      retained,
+    );
+    assert.equal(atCap.completion_call_totals?.omitted, 2);
+    assert.throws(() =>
+      parse(
+        {
+          calls: 1024,
+          failed: 1024,
+          omitted: 2,
+          rate_limit_wait_ms: 1024 * 2000,
+        },
+        retained,
+      ),
+    );
+  });
+
   it('rejects removed root and runtime fields in strict result objects', () => {
     const result = resultFor([]);
     assert.throws(() =>
