@@ -255,6 +255,20 @@ export async function collectJudgeWorkspaceEvidence(
     ordered.length = limits.maxEntries;
   }
 
+  // The loop checks cancellation and the deadline per entry; filtering can
+  // leave it with nothing to visit, so check once after the listing settles.
+  options.signal?.throwIfAborted();
+  if (Date.now() >= deadline) {
+    stop(timeLimit(limits.maxDurationMs));
+    return collected(
+      entries,
+      warnings,
+      bytesRead,
+      truncated,
+      limits.maxTotalCharacters,
+    );
+  }
+
   for (const entry of ordered) {
     options.signal?.throwIfAborted();
     try {
