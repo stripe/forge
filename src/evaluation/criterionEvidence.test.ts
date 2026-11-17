@@ -97,6 +97,15 @@ describe('criterion evidence warnings', () => {
     );
   });
 
+  it('marks an unrecorded trajectory as unknown without claiming it is incomplete', () => {
+    assert.deepEqual(
+      criterionEvidenceWarnings({
+        workspace: { complete: false, warnings: [] },
+      }).map(({ source, code }) => `${source}:${code}`),
+      ['trajectory:evidence_completeness_unknown', 'workspace:workspace_incomplete'],
+    );
+  });
+
   it('bounds the list with a stable explicit marker', () => {
     const warnings = Array.from({ length: 100 }, () => warning);
     const bounded = boundCriterionEvidenceWarnings(warnings);

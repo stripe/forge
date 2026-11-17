@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
-import { renderTrajectoryCaptureStatus } from '../evaluation/criterionEvidence.ts';
-import { verifyCompletedRun } from '../results/index.ts';
+import { parseAtifTrajectory } from '../atif/index.ts';
+import {
+  renderTrajectoryCaptureStatus,
+  UNKNOWN_EVIDENCE_WARNINGS,
+} from '../evaluation/criterionEvidence.ts';
+import { EMPTY_JUDGE_TRANSCRIPT } from '../evaluation/judgeTranscript.ts';
+import { parseResolvedRunPlan } from '../model/parse.ts';
+import { parseJudgeEvidence, verifyCompletedRun } from '../results/index.ts';
 import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
@@ -12,7 +19,11 @@ import {
   runJudgedFixture,
   temporaryRoot,
 } from './__tests__/judgedFixture.ts';
-import { REGRADE_RESULT_FORMAT, regradeCompletedRun } from './run.ts';
+import {
+  judgeInputFromSavedRun,
+  REGRADE_RESULT_FORMAT,
+  regradeCompletedRun,
+} from './run.ts';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -248,6 +259,55 @@ describe('regradeCompletedRun', () => {
     assert.deepEqual(regrade.source.original_judge, {
       provider: 'anthropic',
       model: 'claude-sonnet-4-6',
+    });
+  });
+
+  describe('judgeInputFromSavedRun', () => {
+    async function saved() {
+      const source = await fixture();
+      const read = async (name: string) =>
+        JSON.parse(await fs.readFile(path.join(source.runLocation, name), 'utf8'));
+      const original = await verifyCompletedRun(source.runLocation);
+      return {
+        plan: parseResolvedRunPlan(await read('plan.json')),
+        trajectory: parseAtifTrajectory(await read('trajectory.json')),
+        judgeEvidence: parseJudgeEvidence(await read('judge-evidence.json'), {
+          forgeVersion: original.result.forge.version,
+        }),
+        evidence: original.result.evidence,
+      };
+    }
+
+    it('judges code only when the original judge saw no transcript', async () => {
+      const inputs = await saved();
+      assert.notEqual(
+        judgeInputFromSavedRun(inputs).transcript.transcriptJson,
+        EMPTY_JUDGE_TRANSCRIPT.transcriptJson,
+      );
+      const omitted = {
+        ...inputs,
+        judgeEvidence: {
+          ...inputs.judgeEvidence,
+          transcript: {
+            ...inputs.judgeEvidence.transcript,
+            steps: [],
+            omitted: 'judge_budget_exceeded' as const,
+          },
+        },
+      };
+      assert.deepEqual(
+        judgeInputFromSavedRun(omitted).transcript,
+        EMPTY_JUDGE_TRANSCRIPT,
+      );
+    });
+
+    it('marks unrecorded trajectory completeness as unknown, not partial', async () => {
+      const { evidence: _evidence, ...withoutEvidence } = await saved();
+      const warnings = judgeInputFromSavedRun(withoutEvidence).evidenceWarnings!;
+      assert.deepEqual(
+        warnings.filter(({ source }) => source === 'trajectory'),
+        [...UNKNOWN_EVIDENCE_WARNINGS],
+      );
     });
   });
 });

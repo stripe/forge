@@ -36,7 +36,8 @@ export function boundCriterionEvidenceWarnings(
 
 /** Use the same saved provenance for initial judging and later regrades. */
 export function criterionEvidenceWarnings(input: {
-  readonly trajectory: {
+  /** Absent when the run's trajectory completeness was not recorded. */
+  readonly trajectory?: {
     readonly completeness: 'complete' | 'partial' | 'fallback';
     readonly warnings: readonly {
       readonly code: string;
@@ -54,7 +55,9 @@ export function criterionEvidenceWarnings(input: {
   };
 }): CriterionEvidenceWarningV1[] {
   return boundCriterionEvidenceWarnings([
-    ...(input.trajectory.completeness === 'complete'
+    ...(input.trajectory === undefined
+      ? UNKNOWN_EVIDENCE_WARNINGS
+      : input.trajectory.completeness === 'complete'
       ? []
       : [
           {
@@ -64,7 +67,7 @@ export function criterionEvidenceWarnings(input: {
               'The selected trajectory is partial or uses driver fallback.',
           },
         ]),
-    ...input.trajectory.warnings.map((warning) => ({
+    ...(input.trajectory?.warnings ?? []).map((warning) => ({
       ...warning,
       source: 'trajectory' as const,
     })),
