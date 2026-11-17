@@ -816,7 +816,7 @@ describe('driver fallback redaction', () => {
     return { selected, redactor };
   }
 
-  it('redacts values before cutting them and counts only what is emitted', () => {
+  it('redacts values before cutting them and counts replacements made before the cut', () => {
     const { selected, redactor } = fallback(
       [
         {
@@ -831,6 +831,9 @@ describe('driver fallback redaction', () => {
     const text = JSON.stringify(selected.trajectory);
     assert.equal(text.includes('synthetic-private'), false);
     assert.equal(text.includes('private-token'), false);
+    // Only the result's replacement survives its cut; the assistant and
+    // argument replacements fall after theirs but are still counted.
+    assert.equal(text.split('[REDACTED]').length - 1, 1);
     assert.equal(redactor.replacements, 3);
   });
 
