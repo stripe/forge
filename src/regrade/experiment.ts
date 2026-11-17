@@ -86,10 +86,14 @@ export async function regradeExperimentRun(
   const now = input.now ?? (() => new Date());
   const source = await fs.realpath(path.resolve(input.experimentRun));
   const output = path.resolve(input.output);
-  if (isWithin(source, await realpathOfNearestExisting(output)))
-    throw new Error(
-      'The regrade output must be outside the source experiment run, whose runs must stay unchanged.',
-    );
+  // Every directory this command writes into, resolved physically: the output itself and its `runs`
+  // directory, which may be a symlink even when the output is not.
+  for (const directory of [output, path.join(output, 'runs')]) {
+    if (isWithin(source, await realpathOfNearestExisting(directory)))
+      throw new Error(
+        'The regrade output must be outside the source experiment run, whose runs must stay unchanged.',
+      );
+  }
   const jobs = input.jobs ?? 1;
   if (!Number.isSafeInteger(jobs) || jobs < 1)
     throw new TypeError('jobs must be a positive integer.');

@@ -217,4 +217,47 @@ describe('regradeExperimentRun', () => {
     );
     assert.equal(scripted.scripted.calls.length, 0);
   });
+
+  it('rejects an existing output/runs symlink into the source before any work', async () => {
+    const root = await temporaryRoot('forge-regrade-exp-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const output = path.join(root, 'regrade');
+    await fs.mkdir(output);
+    // The output itself is outside the source, but its runs directory is a
+    // physical alias of one committed run.
+    await fs.symlink(source.runLocation, path.join(output, 'runs'));
+    const before = await snapshotTree(source.experimentLocation);
+    const scripted = dependencies([ORIGINAL_JUDGMENT]);
+    await assert.rejects(
+      regradeExperimentRun(
+        {
+          experimentRun: source.experimentLocation,
+          judge: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+          output,
+        },
+        scripted.dependencies,
+      ),
+      /outside the source experiment run/,
+    );
+    assert.equal(scripted.scripted.calls.length, 0);
+    assert.deepEqual(await snapshotTree(source.experimentLocation), before);
+  });
 });
+
+/** Relative path to content digest of every file under a directory. */
+async function snapshotTree(root: string): Promise<Record<string, string>> {
+  const snapshot: Record<string, string> = {};
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(entryPath);
+      else
+        snapshot[path.relative(root, entryPath)] = (
+          await fs.readFile(entryPath)
+        ).toString('base64');
+    }
+  };
+  await visit(root);
+  return snapshot;
+}
