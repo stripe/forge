@@ -221,7 +221,11 @@ describe('Forge Docker runtime', () => {
         workspace.listFiles({ ...options, maxEntries: 2 }),
         (error) => {
           assert.ok(error instanceof WorkspaceEntryLimitError);
-          assert.equal(error.entries.length, 2);
+          assert.equal(error.maxEntries, 2);
+          assert.deepEqual(
+            error.entries.map(({ path }) => path),
+            ['nested', 'z.txt'],
+          );
           assert.ok(
             error.entries.every(({ path }) => !path.includes('node_modules')),
           );
