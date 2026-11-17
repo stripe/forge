@@ -267,51 +267,56 @@ describe('regradeExperimentRun', () => {
   it.each([
     ['provider preflight', 'preflight'],
     ['credential resolver', 'resolver'],
-  ] as const)('does not persist a credential from a failing %s', async (_name, failing) => {
-    const root = await temporaryRoot('forge-regrade-exp-');
-    roots.push(root);
-    const source = await runJudgedFixture(root);
-    const output = path.join(root, 'regrade');
-    const key = 'synthetic-judge-key-4f9c2a71';
-    const scripted = createScriptedCompletionProvider({
-      id: 'anthropic',
-      responses: [ORIGINAL_JUDGMENT],
-      requirements: {
-        credentials: { token: { reference: credentialReference('judge.key') } },
-      },
-      preflight: () => {
-        throw new Error(`Rejected key ${key}.`);
-      },
-    });
-    const staticResolver = createStaticCredentialResolver({
-      'judge.key': key,
-    });
-    const summary = await regradeExperimentRun(
-      {
-        experimentRun: source.experimentLocation,
-        judge: { provider: 'anthropic', model: 'claude-opus-4-6' },
-        output,
-      },
-      {
-        completionProviders: new Map([['anthropic', scripted.provider]]),
-        credentialResolver:
-          failing === 'preflight'
-            ? staticResolver
-            : {
-                async resolve() {
-                  throw new Error(`Vault refused ${key}.`);
+  ] as const)(
+    'does not persist a credential from a failing %s',
+    async (_name, failing) => {
+      const root = await temporaryRoot('forge-regrade-exp-');
+      roots.push(root);
+      const source = await runJudgedFixture(root);
+      const output = path.join(root, 'regrade');
+      const key = 'synthetic-judge-key-4f9c2a71';
+      const scripted = createScriptedCompletionProvider({
+        id: 'anthropic',
+        responses: [ORIGINAL_JUDGMENT],
+        requirements: {
+          credentials: {
+            token: { reference: credentialReference('judge.key') },
+          },
+        },
+        preflight: () => {
+          throw new Error(`Rejected key ${key}.`);
+        },
+      });
+      const staticResolver = createStaticCredentialResolver({
+        'judge.key': key,
+      });
+      const summary = await regradeExperimentRun(
+        {
+          experimentRun: source.experimentLocation,
+          judge: { provider: 'anthropic', model: 'claude-opus-4-6' },
+          output,
+        },
+        {
+          completionProviders: new Map([['anthropic', scripted.provider]]),
+          credentialResolver:
+            failing === 'preflight'
+              ? staticResolver
+              : {
+                  async resolve() {
+                    throw new Error(`Vault refused ${key}.`);
+                  },
                 },
-              },
-      },
-    );
-    assert.equal(summary.failed.length, 1);
-    assert.equal(scripted.calls.length, 0);
-    assert.doesNotMatch(JSON.stringify(summary), new RegExp(key));
-    assert.doesNotMatch(
-      await fs.readFile(path.join(output, 'regrade.json'), 'utf8'),
-      new RegExp(key),
-    );
-  });
+        },
+      );
+      assert.equal(summary.failed.length, 1);
+      assert.equal(scripted.calls.length, 0);
+      assert.doesNotMatch(JSON.stringify(summary), new RegExp(key));
+      assert.doesNotMatch(
+        await fs.readFile(path.join(output, 'regrade.json'), 'utf8'),
+        new RegExp(key),
+      );
+    },
+  );
 
   it.each([
     [
@@ -364,31 +369,34 @@ describe('regradeExperimentRun', () => {
         saved.source.result_sha256 = `sha256:${'0'.repeat(64)}`;
       },
     ],
-  ])('fails only the run whose saved regrade has %s, without judge calls', async (_name, mutate) => {
-    const root = await temporaryRoot('forge-regrade-exp-');
-    roots.push(root);
-    const source = await runJudgedFixture(root);
-    const output = path.join(root, 'regrade');
-    const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
-    await regradeExperimentRun(
-      { experimentRun: source.experimentLocation, judge, output },
-      dependencies([failingJudgment]).dependencies,
-    );
-    const file = path.join(output, 'runs', 'regrade-source.json');
-    const saved = JSON.parse(await fs.readFile(file, 'utf8'));
-    assert.ok(saved.evaluation.checks!.length > 0);
-    mutate(saved);
-    await fs.writeFile(file, JSON.stringify(saved));
-    const rerun = dependencies([failingJudgment]);
-    const summary = await regradeExperimentRun(
-      { experimentRun: source.experimentLocation, judge, output },
-      rerun.dependencies,
-    );
-    assert.equal(summary.reused, 0);
-    assert.equal(summary.failed.length, 1);
-    assert.equal(summary.failed[0]!.run_id, 'regrade-source');
-    assert.equal(rerun.scripted.calls.length, 0);
-  });
+  ])(
+    'fails only the run whose saved regrade has %s, without judge calls',
+    async (_name, mutate) => {
+      const root = await temporaryRoot('forge-regrade-exp-');
+      roots.push(root);
+      const source = await runJudgedFixture(root);
+      const output = path.join(root, 'regrade');
+      const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
+      await regradeExperimentRun(
+        { experimentRun: source.experimentLocation, judge, output },
+        dependencies([failingJudgment]).dependencies,
+      );
+      const file = path.join(output, 'runs', 'regrade-source.json');
+      const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+      assert.ok(saved.evaluation.checks!.length > 0);
+      mutate(saved);
+      await fs.writeFile(file, JSON.stringify(saved));
+      const rerun = dependencies([failingJudgment]);
+      const summary = await regradeExperimentRun(
+        { experimentRun: source.experimentLocation, judge, output },
+        rerun.dependencies,
+      );
+      assert.equal(summary.reused, 0);
+      assert.equal(summary.failed.length, 1);
+      assert.equal(summary.failed[0]!.run_id, 'regrade-source');
+      assert.equal(rerun.scripted.calls.length, 0);
+    },
+  );
 
   it('rejects an existing output/runs symlink into the source before any work', async () => {
     const root = await temporaryRoot('forge-regrade-exp-');
