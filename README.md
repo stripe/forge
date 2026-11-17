@@ -429,6 +429,24 @@ export OPENCODE_PROVIDER_OPENROUTER_API_KEY=your-openrouter-key
 #   --credential-env OPENCODE_PROVIDER_OPENROUTER_API_KEY
 ```
 
+OpenRouter chooses the upstream provider for each request unless the request
+pins one. To pin it for a model, add `upstream_providers` to that agent
+selection: a list of provider slugs in preference order (1 to 16 unique slugs).
+It is an experiment choice for the model, so it is not host configuration:
+
+```yaml
+- { adapter: opencode, provider: openrouter, model: openrouter-gemini-4-argon,
+    upstream_providers: [google-vertex], model_profile: { ... } }
+```
+
+Requests then carry `provider: {order: [...], allow_fallbacks: false}`. Without
+the field the request is unchanged. Forge sends the pin to whichever route the
+provider name resolves to and cannot tell whether that route is OpenRouter, so
+use it only with OpenRouter routes. Claude Code and Codex reject it. It is part
+of selection identity, so arms that differ in slugs or their order are separate
+selections and report groups, and it is recorded in `plan.json` and the
+selection copy in `result.json`.
+
 CLI provider names use lowercase letters, digits, and underscores; the
 credential reference is `opencode.provider.<name>.api-key`. Selections of
 `openai-compatible` keep `OPENCODE_BASE_URL` and `OPENCODE_API_KEY`. A provider

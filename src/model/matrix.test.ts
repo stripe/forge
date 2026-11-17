@@ -82,6 +82,24 @@ describe('agent selection identity', () => {
         }
       }
     }
+    // The pin enters identity only when authored; the provider name always does.
+    const opencode = {
+      adapter: 'opencode',
+      provider: 'openrouter',
+      model: 'm',
+    };
+    assert.equal(
+      agentSelectionKey(opencode),
+      '["opencode","openrouter","m",null,null]',
+    );
+    assert.equal(
+      agentSelectionKey({ ...opencode, upstream_providers: ['a', 'b'] }),
+      '["opencode","openrouter","m",null,null,["a","b"]]',
+    );
+    assert.notEqual(
+      agentSelectionKey({ ...opencode, upstream_providers: ['a', 'b'] }),
+      agentSelectionKey({ ...opencode, upstream_providers: ['b', 'a'] }),
+    );
     assert.equal(
       agentSelectionKey({ adapter: 'codex', provider: 'openai', model: 'gpt' }),
       '["codex","openai","gpt","native",null]',

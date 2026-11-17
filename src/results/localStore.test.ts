@@ -879,6 +879,42 @@ describe('local artifact store', () => {
     );
   });
 
+  it('round-trips upstream providers in the selection copy and still reads results without them', () => {
+    const result = resultFor([]);
+    assert.equal(
+      parseRunResult(result).selection.agent.upstream_providers,
+      undefined,
+    );
+    const agent = {
+      adapter: 'opencode',
+      provider: 'openrouter',
+      model: 'gateway-code',
+      upstream_providers: ['google-vertex', 'anthropic'],
+      model_profile: {
+        limit: { context: 32000, output: 4000 },
+        reasoning: false,
+        temperature: true,
+        attachment: false,
+      },
+    };
+    const pinned = { ...result, selection: { ...result.selection, agent } };
+    const parsed = parseRunResult(JSON.parse(JSON.stringify(pinned)));
+    assert.deepEqual(parsed.selection.agent, agent);
+    assert.deepEqual(
+      JSON.parse(serializeCanonicalJson(parsed)).selection.agent,
+      agent,
+    );
+    assert.throws(() =>
+      parseRunResult({
+        ...pinned,
+        selection: {
+          ...pinned.selection,
+          agent: { ...agent, upstream_providers: ['bad slug'] },
+        },
+      }),
+    );
+  });
+
   it('strictly parses configuration metadata and rejects removed normalization counters', () => {
     const result = resultFor([]);
     const metadata = { endpoint_mode: 'custom', layout_mode: 'default' };

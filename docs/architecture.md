@@ -962,6 +962,25 @@ the profile plus `tool_call: true` into its generated
 `provider.forge.models[selection.model]` entry and supplies the provider package,
 endpoint, and scoped credential. The main and small model use that same alias.
 
+An OpenCode selection may also set `upstream_providers`, 1 to 16 unique
+provider slugs in preference order (rejected for Claude Code and Codex). It is
+experiment config chosen per model, not host provider configuration: part of
+selection identity, so arms that differ in slugs or order are distinct
+selections and report groups, and recorded in `plan.json` and the selection copy
+in `result.json`. For a pinned selection the adapter writes
+`options.provider = {order, allow_fallbacks: false}` into the generated
+`provider.forge.models[alias]` entry; unpinned selections generate the same
+config as before. Forge sends the pin to whichever route the provider name
+resolves to and cannot tell whether it is OpenRouter. By reading OpenCode
+v1.19.0 and `@ai-sdk/openai-compatible` 2.0.41, config model `options` are
+merged into the call options (`provider/provider.ts`,
+`session/llm/request.ts`), passed through `ProviderTransform.providerOptions`
+under the provider ID `forge` (`session/llm.ts`, `provider/transform.ts`), and
+the SDK's `getArgs` spreads keys outside its own schema, such as `provider`,
+into the request body. End-to-end delivery has not been captured from a live or
+fake-upstream run, and Forge does not record which upstream provider actually
+served a call.
+
 A workspace `opencode.json` is ignored. Automatic project configuration,
 external skill, and AGENTS.md/CLAUDE.md discovery are disabled or unsupported.
 Before each turn, the launcher rejects implicit global config files, discovered

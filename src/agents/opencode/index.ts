@@ -130,6 +130,7 @@ export function createOpenCodeAdapter(
     if (selection.model_profile === undefined)
       throw new TypeError('OpenCode requires an explicit model_profile.');
     const model = `forge/${selection.model}`;
+    const pin = selection.upstream_providers;
     return {
       executables: [executable, 'node'],
       environment: {
@@ -161,6 +162,26 @@ export function createOpenCodeAdapter(
                   [selection.model]: {
                     ...selection.model_profile,
                     tool_call: true,
+                    // Pin the upstream provider behind an OpenRouter route. By
+                    // source reading of OpenCode v1.19.0 and
+                    // @ai-sdk/openai-compatible 2.0.41: (1) provider/provider.ts
+                    // merges config model `options`; (2) session/llm/request.ts
+                    // merges them into the call options; (3) session/llm.ts
+                    // passes them through ProviderTransform.providerOptions;
+                    // (4) transform.ts keys them by the provider ID `forge`;
+                    // (5) the SDK's getArgs spreads providerOptions.forge keys
+                    // outside its own schema, such as `provider`, into the
+                    // request body. Delivery is not proven end to end.
+                    ...(pin === undefined
+                      ? {}
+                      : {
+                          options: {
+                            provider: {
+                              order: [...pin],
+                              allow_fallbacks: false,
+                            },
+                          },
+                        }),
                   },
                 },
                 env: ['OPENCODE_API_KEY'],

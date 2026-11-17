@@ -184,6 +184,27 @@ describe('experiment run scorecards', () => {
     assert.deepEqual(parseExperimentRunReport(report), report);
   });
 
+  it('keeps arms that differ only by upstream provider pin in separate score groups', () => {
+    const runs = [row(0), row(1)];
+    runs[0]!.selection.agent = {
+      adapter: 'opencode',
+      provider: 'openrouter',
+      model: 'gateway-code',
+      model_profile: OPEN_CODE_MODEL_PROFILE,
+      upstream_providers: ['google-vertex'],
+    };
+    runs[1]!.selection.agent = {
+      ...runs[0]!.selection.agent,
+      upstream_providers: ['anthropic'],
+    };
+    const report = build(runs);
+    assert.deepEqual(
+      report.cases.map(({ agent }) => agent.upstream_providers),
+      [['google-vertex'], ['anthropic']],
+    );
+    assert.deepEqual(parseExperimentRunReport(report), report);
+  });
+
   it('retains model profiles in checkpoints and report rows and separates their score groups', () => {
     const runs = [row(0), row(1)];
     runs[0]!.selection.agent = {

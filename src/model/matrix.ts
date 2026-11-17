@@ -27,8 +27,9 @@ export function agentSelectionKey(agent: {
   model: string;
   hook_trust?: 'native' | 'automation' | undefined;
   model_profile?: AgentSelectionV1['model_profile'] | undefined;
+  upstream_providers?: readonly string[] | undefined;
 }): string {
-  return JSON.stringify([
+  const key: unknown[] = [
     agent.adapter,
     agent.provider,
     agent.model,
@@ -39,7 +40,11 @@ export function agentSelectionKey(agent: {
           ModelProfileSchema,
           ModelProfileSchema.parse(agent.model_profile),
         ),
-  ]);
+  ];
+  // Appended only when authored, so existing keys keep their bytes.
+  if (agent.upstream_providers !== undefined)
+    key.push(agent.upstream_providers);
+  return JSON.stringify(key);
 }
 
 // Preserve the existing flat key format, visiting fields in schema order rather

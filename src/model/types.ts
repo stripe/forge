@@ -202,6 +202,8 @@ export interface AgentSelectionV1 extends ModelRefV1 {
   adapter: string;
   /** Codex hook review: native by default; automation permits all enabled hooks. */
   hook_trust?: 'native' | 'automation';
+  /** OpenRouter upstream provider slugs in preference order; OpenCode only. Fallbacks are disabled. */
+  upstream_providers?: string[];
   /** Explicit model limits and capabilities; required by OpenCode. */
   model_profile?: {
     limit: { context: number; output: number };
