@@ -1,4 +1,6 @@
 import {
+  CLIENT_COMPLETION_INVOCATION_CODES,
+  COMPLETION_PROVIDER_ERROR_CLASS,
   CompletionInvocationError,
   type CompletionRetryDecision,
   completionTransportObservationSchema,
@@ -85,7 +87,11 @@ export function completionRetryDecision(
     error instanceof CompletionInvocationError ? error.observation : undefined,
   );
   const observation = parsed.success ? parsed.data : undefined;
-  if (observation?.provider_error_code === 'insufficient_quota') {
+  const providerClass =
+    observation?.provider_error_code === undefined
+      ? undefined
+      : COMPLETION_PROVIDER_ERROR_CLASS[observation.provider_error_code];
+  if (providerClass === 'permanent') {
     return { state, decision: { disposition: 'exhausted', wait_ms: 0 } };
   }
   const status = observation?.http_status;
@@ -94,22 +100,10 @@ export function completionRetryDecision(
     (status === 503 && observation?.retry_after_ms !== undefined);
   const short =
     parseFailure ||
-    [
-      'invalid_request_error',
-      'authentication_error',
-      'invalid_api_key',
-      'permission_error',
-      'not_found_error',
-      'model_not_found',
-      'context_length_exceeded',
-      'invalid_value',
-      'request_too_large',
-    ].includes(observation?.provider_error_code ?? '') ||
+    providerClass === 'client' ||
     [400, 401, 403, 404].includes(status ?? 0) ||
     (error instanceof CompletionInvocationError &&
-      ['invalid_request', 'invalid_credentials', 'invalid_output'].includes(
-        error.code,
-      ));
+      CLIENT_COMPLETION_INVOCATION_CODES.includes(error.code));
   const category = rateLimited
     ? 'rateLimitRetries'
     : short

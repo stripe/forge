@@ -8,6 +8,11 @@ import {
   waitForCompletionRetry,
 } from './completionRetry.ts';
 import { CompletionInvocationError } from './contracts/completion.ts';
+import {
+  COMPLETION_PROVIDER_ERROR_CLASS,
+  type CompletionProviderErrorCode,
+  completionProviderErrorCodeSchema,
+} from './contracts/completionObservation.ts';
 import { observeCompletionFailure } from './providers/transportObservation.ts';
 import { MAX_RECORDED_COMPLETION_ATTEMPTS } from './results/types.ts';
 
@@ -299,6 +304,44 @@ describe('completion retry policy', () => {
     assert.deepEqual(decisions, [
       { disposition: 'rate_limit_retry', wait_ms: 123 },
     ]);
+  });
+
+  it('classifies every recognized provider error code', () => {
+    for (const code of completionProviderErrorCodeSchema.options) {
+      assert.ok(code in COMPLETION_PROVIDER_ERROR_CLASS, code);
+    }
+    // Rate-limit and server-fault codes follow the HTTP status, not the code.
+    const coded = (status: number, code: CompletionProviderErrorCode) =>
+      completionRetryDecision(
+        INITIAL_COMPLETION_RETRY_STATE,
+        new CompletionInvocationError('http_error', 'Failed', {
+          origin: 'host_transport',
+          http_status: status,
+          provider_error_code: code,
+        }),
+        false,
+        1,
+      ).decision;
+    assert.deepEqual(coded(429, 'rate_limit_exceeded'), {
+      disposition: 'rate_limit_retry',
+      wait_ms: 2000,
+    });
+    assert.deepEqual(coded(500, 'rate_limit_exceeded'), {
+      disposition: 'retry',
+      wait_ms: 4000,
+    });
+    assert.deepEqual(coded(500, 'invalid_api_key'), {
+      disposition: 'retry',
+      wait_ms: 1000,
+    });
+    assert.deepEqual(coded(529, 'overloaded_error'), {
+      disposition: 'retry',
+      wait_ms: 4000,
+    });
+    assert.deepEqual(coded(500, 'insufficient_quota'), {
+      disposition: 'exhausted',
+      wait_ms: 0,
+    });
   });
 
   it('does not start a wait that would reach the remaining run time', () => {

@@ -1073,8 +1073,18 @@ Ava and criterion judging share one retry policy per logical request:
 - HTTP 400, 401, 403, 404, recognized invalid-request/authentication errors,
   and malformed structured output use the short 1- and 5-second schedule.
 - Other failures, including unclassified custom-provider errors, HTTP 5xx
-  without the rate-limit signal, transport errors, and timeouts, get three
+  without the rate-limit signal (including the recognized `overloaded_error`,
+  `api_error`, and `server_error` codes), transport errors, and timeouts, get three
   retries with 4-, 16-, and 64-second base delays and the same jitter.
+
+Whether each recognized provider error code is permanent, a request fault, or
+follows the HTTP status is one exhaustive table in
+[`completionObservation.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completionObservation.ts), so a
+new code cannot ship unclassified. A custom `CompletionProvider` steers the
+policy only by throwing a `CompletionInvocationError`, or an error with a
+string `code` and an `observation` of the same shape; the
+`CompletionProvider.complete` documentation lists the effects. Providers must
+not retry on their own.
 
 Rate-limit, short, and fallback retries each have a separate budget per logical
 request. Mixed failures can use at most 12 calls in total. Failures that cannot

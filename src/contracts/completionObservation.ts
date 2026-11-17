@@ -22,6 +22,43 @@ export type CompletionProviderErrorCode = z.infer<
   typeof completionProviderErrorCodeSchema
 >;
 
+/**
+ * How the shared retry policy treats a recognized provider error code.
+ * `permanent` stops at once and `client` uses the short schedule. `by_status`
+ * codes name a condition the HTTP status already carries (429, or 503 with
+ * `Retry-After`, for rate limits; other statuses for server faults), so the
+ * status selects the schedule.
+ */
+export type CompletionProviderErrorClass = 'permanent' | 'client' | 'by_status';
+
+/** Exhaustive, so a new recognized code fails typecheck until it is classified. */
+export const COMPLETION_PROVIDER_ERROR_CLASS: Readonly<
+  Record<CompletionProviderErrorCode, CompletionProviderErrorClass>
+> = Object.freeze({
+  invalid_request_error: 'client',
+  authentication_error: 'client',
+  permission_error: 'client',
+  not_found_error: 'client',
+  invalid_api_key: 'client',
+  model_not_found: 'client',
+  context_length_exceeded: 'client',
+  invalid_value: 'client',
+  request_too_large: 'client',
+  insufficient_quota: 'permanent',
+  rate_limit_error: 'by_status',
+  rate_limit_exceeded: 'by_status',
+  overloaded_error: 'by_status',
+  api_error: 'by_status',
+  server_error: 'by_status',
+});
+
+/**
+ * `CompletionInvocationError.code` values for which the shared policy knows
+ * the reply or request itself was at fault, so the short schedule applies.
+ */
+export const CLIENT_COMPLETION_INVOCATION_CODES: readonly string[] =
+  Object.freeze(['invalid_request', 'invalid_credentials', 'invalid_output']);
+
 export const completionTransportObservationSchema = z
   .object({
     origin: z.literal('host_transport'),
