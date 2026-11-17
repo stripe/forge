@@ -1,4 +1,8 @@
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import type {
+  AgentToolCall,
+  AgentToolResult,
+  AgentTurn,
+} from '../../contracts/agent.ts';
 import { textToolResult } from '../toolResult.ts';
 
 const MAX_STREAM_LINES = 100_000;
@@ -9,6 +13,8 @@ interface ClaudeStreamEvent {
   type?: string;
   result?: string;
   session_id?: string;
+  /** Set on messages produced inside a subagent (Task) run. */
+  parent_tool_use_id?: unknown;
   total_cost_usd?: number;
   message?: {
     content?: Array<{
@@ -27,7 +33,7 @@ interface ClaudeStreamEvent {
 /** Parse one completed `claude --output-format stream-json` invocation. */
 export function parseClaudeStream(stdout: string): AgentTurn {
   const toolCalls: AgentToolCall[] = [];
-  const results = new Map<string, NonNullable<AgentToolCall['result']>>();
+  const results = new Map<string, AgentToolResult>();
   const toolIds = new Set<string>();
   let resultText: string | undefined;
   let lastAssistantText = '';
@@ -70,7 +76,11 @@ export function parseClaudeStream(stdout: string): AgentTurn {
           }
         }
       }
-    } else if (event.type === 'user') {
+    } else if (
+      event.type === 'user' &&
+      // Subagent output belongs to separately selected evidence, not the root.
+      typeof event.parent_tool_use_id !== 'string'
+    ) {
       for (const block of event.message?.content ?? []) {
         if (
           block.type === 'tool_result' &&

@@ -56,6 +56,55 @@ it('correlates tool results by ID and marks omitted media without retaining its 
   assert.doesNotMatch(JSON.stringify(parsed), /private-image-bytes/);
 });
 
+it('retains only root tool results when subagent messages carry a parent tool ID', () => {
+  const parsed = parseClaudeStream(
+    [
+      {
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', id: 'task', name: 'Task' }],
+        },
+      },
+      {
+        type: 'assistant',
+        parent_tool_use_id: 'task',
+        message: {
+          content: [{ type: 'tool_use', id: 'inner', name: 'Read' }],
+        },
+      },
+      {
+        type: 'user',
+        parent_tool_use_id: 'task',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'inner', content: 'private' },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        parent_tool_use_id: null,
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'task', content: 'summary' },
+          ],
+        },
+      },
+      { type: 'result', session_id: 'selected', result: 'done' },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join('\n'),
+  );
+  assert.deepEqual(
+    parsed.toolCalls.map(({ id, result }) => [id, result]),
+    [
+      ['task', { content: 'summary' }],
+      ['inner', undefined],
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(parsed), /private/);
+});
+
 it('ignores bounded banner and primitive noise while retaining terminal text, calls, and valid cost', () => {
   const stream = [
     'Claude banner',

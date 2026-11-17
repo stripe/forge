@@ -1090,7 +1090,8 @@ activity for each turn. Arguments over 4,096 UTF-16 code units, depth 16, or
 Unsafe or lossy input values use the judge-visible `forge_omitted_arguments` key
 with an omission marker.
 Available tool-result text retains up to 8,192 code units per call, correlated
-with its invocation and error state. Claude Code supplies tool-result text,
+with its invocation and error state. Claude Code supplies root tool-result text (messages with a parent tool ID are
+subagent work and are skipped),
 Codex supplies command and MCP output, and OpenCode supplies tool output or
 errors. A started-only Codex command or MCP call, or an OpenCode call with no
 usable output, has an unavailable marker and makes no claim about success or
