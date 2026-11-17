@@ -118,10 +118,7 @@ describe('credential redaction', () => {
     const serialized = JSON.stringify({ token: secret });
     assert.ok(!serialized.includes(secret));
 
-    const result = redactSecrets(
-      { raw: `a ${secret}`, serialized },
-      [secret],
-    );
+    const result = redactSecrets({ raw: `a ${secret}`, serialized }, [secret]);
     assert.deepEqual(result.value, {
       raw: `a ${REDACTED_SECRET}`,
       serialized: `{"token":"${REDACTED_SECRET}"}`,
