@@ -1017,14 +1017,18 @@ terminal. With a nonterminal configured initial prompt, a needs-only completion
 runs before that opening is sent verbatim; otherwise Ava generates the opening
 and needs together.
 The first agent answer follows the continuation path in both cases.
-Nonterminal configured openings therefore cost one additional Ava call per eval.
+A nonterminal configured opening therefore adds one Ava call (with a larger
+output budget) per eval, which includes every bundled multi-turn case; provider
+output floors can make that budget increase a no-op.
 Configured openings containing the stop sentinel skip initialization and keep a
 null private-state audit: the runner sends the opening once and stops after the
 agent's answer.
 
 Runs produced before needs were initialized ahead of the first answer and
-acceptance was fixed have different Ava semantics. Plans record the Forge version,
-with no separate Ava version.
+acceptance was fixed have different Ava semantics, so do not pool their scores
+with later runs. Plans record the Forge version, which does not change between
+development builds and carries no separate Ava version. Initialized runs
+record `acceptance` on every need in `interaction.json`; older runs omit it.
 
 [`runConversation`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) alternates Ava decisions
 and sends through one agent session. Except for terminal configured openings,
