@@ -19,6 +19,7 @@ import type {
   AgentSessionRuntime,
   AgentTurn,
 } from '../contracts/agent.ts';
+import type { CompletionRetryOptions } from '../completionRetry.ts';
 import type {
   RunArtifact,
   RunArtifactTransaction,
@@ -171,6 +172,11 @@ interface ExecuteEvalTestHooks {
     failedAttempt: number,
     signal: AbortSignal,
   ) => Promise<void>;
+  /** Deterministic clock, jitter, and sleep for Ava and judge retries. */
+  readonly completionRetry?: Pick<
+    CompletionRetryOptions,
+    'now' | 'random' | 'sleep'
+  >;
   /** Injects first-party test actions without exposing a host action registry. */
   readonly setupExecutor?: SetupExecutor;
 }
@@ -437,6 +443,7 @@ export async function executeEvalWithTestHooks(
         completions,
         signal,
         hooks.waitBeforeCompletionRetry,
+        hooks.completionRetry,
       );
     });
 
@@ -591,6 +598,7 @@ export async function executeEvalWithTestHooks(
             ).content;
           },
           {
+            ...hooks.completionRetry,
             redactionSecrets: secrets,
             onRetryDecision: completions.recordRetryDecision,
             validateRequest: (request) =>
@@ -792,6 +800,7 @@ async function executeInteraction(
   completions: PreparedCompletionRuntime,
   signal: AbortSignal,
   waitBeforeCompletionRetry: ExecuteEvalTestHooks['waitBeforeCompletionRetry'],
+  retryOptions: ExecuteEvalTestHooks['completionRetry'],
 ): Promise<ExecutedInteraction> {
   let lastTurnSessionId: string | undefined;
   const trackedSession: AgentSession = Object.freeze({
@@ -876,6 +885,7 @@ async function executeInteraction(
     (request, attempt) =>
       completions.invoke('role_player', request, signal, attempt),
     {
+      ...retryOptions,
       redactionSecrets: completions.secrets,
       onRetryDecision: completions.recordRetryDecision,
       ...(waitBeforeCompletionRetry === undefined

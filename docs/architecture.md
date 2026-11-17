@@ -1081,7 +1081,8 @@ request. Mixed failures can use at most 12 calls in total. Failures that cannot
 be classified use the bounded fallback schedule; non-finite random samples use
 the full scheduled delay. Cancellation interrupts waits and prevents further
 calls. The plan's run timeout still bounds execution. Clock, random source, and sleep can be
-supplied through Ava and judge execution options for deterministic hosts.
+supplied through Ava and judge execution options, and through the
+`completionRetry` input of the regrade functions, for deterministic hosts.
 The exported legacy attempt constants describe the short schedule. Observation
 callbacks cannot change retry or cancellation outcomes. If the measurement
 clock fails, the per-call wait stays absent (unknown) rather than becoming zero.

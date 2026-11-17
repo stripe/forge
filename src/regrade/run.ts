@@ -99,7 +99,12 @@ export async function regradeCompletedRun(
     readonly judge: ModelRefV1;
     readonly signal?: AbortSignal;
     readonly now?: () => Date;
-    /** Test seam for the judge's fixed retry waits, as in execution. */
+    /** Clock, jitter, and sleep for judge retries; defaults to the wall clock. */
+    readonly completionRetry?: Pick<
+      CriterionJudgeExecutionOptions,
+      'now' | 'random' | 'sleep'
+    >;
+    /** @deprecated Use `completionRetry.sleep`; an explicit `sleep` wins. */
     readonly waitBeforeJudgeRetry?: CriterionJudgeExecutionOptions['waitBeforeRetry'];
   },
   dependencies: RegradeDependencies,
@@ -151,6 +156,7 @@ export async function regradeCompletedRun(
         )
       ).content,
     {
+      ...input.completionRetry,
       redactionSecrets: completions.secrets,
       onRetryDecision: completions.recordRetryDecision,
       ...(input.waitBeforeJudgeRetry === undefined

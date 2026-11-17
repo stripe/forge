@@ -75,6 +75,10 @@ export async function regradeExperimentRun(
       readonly run_id: string;
       readonly state: RegradeOutcome['kind'];
     }) => void;
+    readonly completionRetry?: Parameters<
+      typeof regradeCompletedRun
+    >[0]['completionRetry'];
+    /** @deprecated Use `completionRetry.sleep`. */
     readonly waitBeforeJudgeRetry?: Parameters<
       typeof regradeCompletedRun
     >[0]['waitBeforeJudgeRetry'];
@@ -162,6 +166,9 @@ export async function regradeExperimentRun(
             judge: input.judge,
             signal,
             now,
+            ...(input.completionRetry === undefined
+              ? {}
+              : { completionRetry: input.completionRetry }),
             ...(input.waitBeforeJudgeRetry === undefined
               ? {}
               : { waitBeforeJudgeRetry: input.waitBeforeJudgeRetry }),

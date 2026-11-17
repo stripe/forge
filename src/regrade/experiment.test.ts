@@ -3,9 +3,11 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 import { parseExperimentRunReport } from '../experimentReport.ts';
+import { CompletionInvocationError } from '../contracts/completion.ts';
 import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
+  type ScriptedCompletionStep,
 } from '../testing/index.ts';
 import {
   ORIGINAL_JUDGMENT,
@@ -27,7 +29,7 @@ const failingJudgment = JSON.stringify({
   results: [{ index: 0, passed: false, explanation: 'Not shown.' }],
 });
 
-function dependencies(responses: string[]) {
+function dependencies(responses: ScriptedCompletionStep[]) {
   const scripted = createScriptedCompletionProvider({
     id: 'anthropic',
     responses,
@@ -244,5 +246,53 @@ describe('regradeExperimentRun', () => {
       /outside the source experiment run/,
     );
     assert.equal(scripted.scripted.calls.length, 0);
+  });
+
+  it('reports the regrade judge calls and measured rate-limit waits', async () => {
+    const root = await temporaryRoot('forge-regrade-wait-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const output = path.join(root, 'regrade-waits');
+    const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
+    const limited = dependencies([
+      new CompletionInvocationError('http_error', 'Rate limited', {
+        origin: 'host_transport',
+        http_status: 429,
+        retry_after_ms: 3000,
+      }),
+      failingJudgment,
+    ]);
+    let elapsed = 0;
+    await regradeExperimentRun(
+      {
+        experimentRun: source.experimentLocation,
+        judge,
+        output,
+        completionRetry: {
+          now: () => elapsed,
+          random: () => 1,
+          sleep: async (ms) => {
+            elapsed += ms;
+          },
+        },
+      },
+      limited.dependencies,
+    );
+    const saved = JSON.parse(
+      await fs.readFile(
+        path.join(output, 'runs', 'regrade-source.json'),
+        'utf8',
+      ),
+    );
+    assert.deepEqual(saved.completion_calls[0].retry, {
+      decision: 'rate_limit_retry',
+      wait_ms: 3000,
+    });
+    assert.equal(saved.completion_call_totals.rate_limit_wait_ms, 3000);
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
+    );
+    assert.equal(report.runs[0]!.rate_limit_wait_ms, 3000);
+    assert.equal(report.summary.rate_limit_wait_ms, 3000);
   });
 });
