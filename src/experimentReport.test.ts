@@ -1433,6 +1433,8 @@ describe('experiment run scorecards', () => {
     fixture.options.plans = Array.from({ length: 4 }, (_, repetition) => {
       const repeated = structuredClone(plan);
       repeated.selection.repetition = repetition;
+      // The unwaited fallback schedule needs more than the default test budget.
+      repeated.limits.run_timeout_ms = 30 * 60 * 1000;
       return defaultForgeEngine.parseResolvedRunPlan(repeated);
     });
     const requirements = {

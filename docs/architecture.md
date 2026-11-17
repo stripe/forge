@@ -1080,9 +1080,14 @@ Rate-limit, short, and fallback retries each have a separate budget per logical
 request. Mixed failures can use at most 12 calls in total. Failures that cannot
 be classified use the bounded fallback schedule; non-finite random samples use
 the full scheduled delay. Cancellation interrupts waits and prevents further
-calls. The plan's run timeout still bounds execution. Clock, random source, and sleep can be
-supplied through Ava and judge execution options, and through the
-`completionRetry` input of the regrade functions, for deterministic hosts.
+calls. Waits spend the plan's run timeout. When the next wait would reach that
+deadline, the request is exhausted instead: a judge criterion records
+`request_error` and the run still commits, so a rate-limited judge cannot cost
+the run its result. A wait already in progress when the deadline fires, or a
+provider call that outlasts it, still aborts the run. Regrades have no run
+deadline. Clock, random source, and sleep can be supplied through Ava and
+judge execution options, and through the `completionRetry` input of the
+regrade functions, for deterministic hosts.
 The exported legacy attempt constants describe the short schedule. Observation
 callbacks cannot change retry or cancellation outcomes. If the measurement
 clock fails, the per-call wait stays absent (unknown) rather than becoming zero.

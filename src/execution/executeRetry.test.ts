@@ -28,6 +28,7 @@ const limited = (retryAfterMs?: number) =>
 async function run(
   responses: readonly ScriptedCompletionStep[],
   plan: Parameters<typeof executeEvalWithTestHooks>[0]['plan'],
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>,
 ) {
   const agent = createScriptedAgentAdapter();
   const provider = createScriptedCompletionProvider({
@@ -53,10 +54,12 @@ async function run(
       completionRetry: {
         now: () => elapsed,
         random: () => 1,
-        sleep: async (ms) => {
-          waits.push(ms);
-          elapsed += ms;
-        },
+        sleep:
+          sleep ??
+          (async (ms) => {
+            waits.push(ms);
+            elapsed += ms;
+          }),
       },
     },
   );
@@ -116,6 +119,34 @@ describe('retry evidence through executeEval', () => {
     assert.equal(
       completed.result.completion_call_totals?.rate_limit_wait_ms,
       2000,
+    );
+  });
+
+  it('commits a judge error instead of losing the run when a wait would pass the run timeout', async () => {
+    const plan = createTestResolvedRunPlan({
+      prompt: 'Do the task.',
+      judgingCriteria: ['The task is done.'],
+      judge: MODEL,
+    });
+    // The stand-in sleep only ends when the run signal aborts, as a real wait
+    // that outlasts the run timeout would.
+    const { completed } = await run(
+      [limited(), limited(), verdict],
+      { ...plan, limits: { run_timeout_ms: 100 } },
+      (_ms, signal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          });
+        }),
+    );
+    const criterion = completed.result.evaluation.judging_criteria[0];
+    assert.equal(criterion?.passed, null);
+    assert.equal(criterion?.error?.type, 'request_error');
+    assert.equal(completed.result.completion_calls.length, 1);
+    assert.equal(
+      completed.result.completion_calls[0]?.retry?.decision,
+      'exhausted',
     );
   });
 });

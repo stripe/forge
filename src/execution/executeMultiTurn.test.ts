@@ -897,7 +897,8 @@ describe('executeEval multi-turn and judging integration', () => {
     const completed = await executeEvalWithTestHooks(
       {
         runId: 'ava-failure-1',
-        plan,
+        // The unwaited fallback schedule needs more than the default test budget.
+        plan: { ...plan, limits: { run_timeout_ms: 30 * 60 * 1000 } },
         composition: {
           runtime: runtime.adapter,
           agents: new Map([

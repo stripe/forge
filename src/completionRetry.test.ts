@@ -301,6 +301,37 @@ describe('completion retry policy', () => {
     ]);
   });
 
+  it('does not start a wait that would reach the remaining run time', () => {
+    const decide = (remaining: number) =>
+      completionRetryDecision(
+        INITIAL_COMPLETION_RETRY_STATE,
+        failure(429),
+        false,
+        1,
+        remaining,
+      );
+    assert.deepEqual(decide(2000).decision, {
+      disposition: 'exhausted',
+      wait_ms: 0,
+    });
+    assert.equal(decide(2000).state, INITIAL_COMPLETION_RETRY_STATE);
+    assert.deepEqual(decide(2001).decision, {
+      disposition: 'rate_limit_retry',
+      wait_ms: 2000,
+    });
+    // A Retry-After floor counts toward the wait that must fit.
+    assert.equal(
+      completionRetryDecision(
+        INITIAL_COMPLETION_RETRY_STATE,
+        failure(429, 30000),
+        false,
+        1,
+        10000,
+      ).decision.disposition,
+      'exhausted',
+    );
+  });
+
   describe('retryCompletion', () => {
     const signal = new AbortController().signal;
     const failing = async () => ({
@@ -328,6 +359,28 @@ describe('completion retry policy', () => {
       );
       assert.equal(exhausted.ok, false);
       assert.equal(exhausted.ok ? 0 : exhausted.attempts, 7);
+    });
+
+    it('stops retrying once the next wait would cross the deadline', async () => {
+      let elapsed = 0;
+      const waits: number[] = [];
+      const exhausted = await retryCompletion(
+        signal,
+        {
+          now: () => elapsed,
+          deadline: 7000,
+          random: () => 1,
+          sleep: async (ms) => {
+            waits.push(ms);
+            elapsed += ms;
+          },
+        },
+        failing,
+      );
+      // 2 s + 4 s fit; the 8 s wait would pass the 7 s deadline.
+      assert.deepEqual(waits, [2000, 4000]);
+      assert.equal(exhausted.ok, false);
+      assert.equal(exhausted.ok ? 0 : exhausted.attempts, 3);
     });
 
     it('prefers sleep over the legacy waitBeforeRetry seam', async () => {

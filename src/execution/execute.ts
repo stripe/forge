@@ -323,6 +323,12 @@ export async function executeEvalWithTestHooks(
   const timeoutSignal = AbortSignal.timeout(input.plan.limits.run_timeout_ms);
   const signal = AbortSignal.any([externalSignal, timeoutSignal]);
   const now = input.now ?? (() => new Date());
+  const retryOptions = {
+    ...hooks.completionRetry,
+    deadline:
+      (hooks.completionRetry?.now ?? Date.now)() +
+      input.plan.limits.run_timeout_ms,
+  };
   const startedAt = now();
   const events = createRunEventEmitter(
     input.composition.observer ? [input.composition.observer] : [],
@@ -443,7 +449,7 @@ export async function executeEvalWithTestHooks(
         completions,
         signal,
         hooks.waitBeforeCompletionRetry,
-        hooks.completionRetry,
+        retryOptions,
       );
     });
 
@@ -598,7 +604,7 @@ export async function executeEvalWithTestHooks(
             ).content;
           },
           {
-            ...hooks.completionRetry,
+            ...retryOptions,
             redactionSecrets: secrets,
             onRetryDecision: completions.recordRetryDecision,
             validateRequest: (request) =>
@@ -800,7 +806,7 @@ async function executeInteraction(
   completions: PreparedCompletionRuntime,
   signal: AbortSignal,
   waitBeforeCompletionRetry: ExecuteEvalTestHooks['waitBeforeCompletionRetry'],
-  retryOptions: ExecuteEvalTestHooks['completionRetry'],
+  retryOptions: CompletionRetryOptions,
 ): Promise<ExecutedInteraction> {
   let lastTurnSessionId: string | undefined;
   const trackedSession: AgentSession = Object.freeze({

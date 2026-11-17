@@ -48,6 +48,12 @@ export interface CompletionAttemptContext {
 
 export interface CompletionRetryOptions {
   readonly now?: () => number;
+  /**
+   * Time on the `now` clock at which the run stops. A retry whose wait would
+   * reach it is not started, so the request fails now instead of the run
+   * losing its committed result to the deadline.
+   */
+  readonly deadline?: number;
   readonly random?: () => number;
   readonly sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   /**
@@ -70,6 +76,7 @@ export function completionRetryDecision(
   error: unknown,
   parseFailure: boolean,
   random: number,
+  remainingMs?: number,
 ): {
   readonly state: CompletionRetryState;
   readonly decision: CompletionRetryDecision;
@@ -124,6 +131,8 @@ export function completionRetryDecision(
   const delay = rateLimited
     ? Math.max(scheduledDelay, observation?.retry_after_ms ?? 0)
     : scheduledDelay;
+  if (remainingMs !== undefined && Math.min(MAX_COMPLETION_RETRY_WAIT_MS, delay) >= remainingMs)
+    return { state, decision: { disposition: 'exhausted', wait_ms: 0 } };
   return {
     state: {
       ...state,
@@ -185,6 +194,7 @@ export async function retryCompletion<T>(
       outcome.error,
       outcome.parseFailure,
       (options.random ?? Math.random)(),
+      remainingMilliseconds(options),
     );
     state = next.state;
     const waitBeforeRetry = options.waitBeforeRetry;
@@ -198,6 +208,18 @@ export async function retryCompletion<T>(
           }),
     });
     if (next.decision.disposition === 'exhausted') return { ...outcome, attempts };
+  }
+}
+
+function remainingMilliseconds(
+  options: CompletionRetryOptions,
+): number | undefined {
+  if (options.deadline === undefined) return undefined;
+  try {
+    return options.deadline - (options.now ?? Date.now)();
+  } catch {
+    // An unavailable clock cannot bound the wait.
+    return undefined;
   }
 }
 
