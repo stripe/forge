@@ -81,7 +81,7 @@ export async function regradeExperimentRun(
   const now = input.now ?? (() => new Date());
   const source = await fs.realpath(path.resolve(input.experimentRun));
   const output = path.resolve(input.output);
-  if (isWithin(source, output))
+  if (isWithin(source, await realpathOfNearestExisting(output)))
     throw new Error(
       'The regrade output must be outside the source experiment run, whose runs must stay unchanged.',
     );
@@ -264,6 +264,29 @@ export async function regradeExperimentRun(
     `${JSON.stringify(summary, null, 2)}\n`,
   );
   return summary;
+}
+
+/**
+ * Resolve symlinks in a path that may not exist yet, so it compares with the realpath of the source run (e.g. macOS
+ * `/var` → `/private/var`): the nearest existing ancestor is resolved and the missing tail is appended unchanged.
+ */
+async function realpathOfNearestExisting(candidate: string): Promise<string> {
+  const missing: string[] = [];
+  let existing = candidate;
+  for (;;) {
+    try {
+      return path.join(await fs.realpath(existing), ...missing.reverse());
+    } catch (error) {
+      const parent = path.dirname(existing);
+      if (
+        (error as NodeJS.ErrnoException).code !== 'ENOENT' ||
+        parent === existing
+      )
+        throw error;
+      missing.push(path.basename(existing));
+      existing = parent;
+    }
+  }
 }
 
 function isWithin(parent: string, candidate: string): boolean {
