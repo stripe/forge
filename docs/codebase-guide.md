@@ -520,7 +520,7 @@ application across several files.
 | [`forgeWrite.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeWrite.ts) | `writeSetupHandler` | Copies inline or dataset bytes/trees through `RunInputProvider` into `MutableWorkspace`. |
 | [`forgeCommand.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeCommand.ts) | `commandSetupHandler` | Runs a bounded argv command through the uncredentialed per-step runner. |
 | [`forgeCredentials.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgeCredentials.ts) | `credentialsSetupHandler` | Declares agent-scoped credentials from runtime environment names; application performs no commands or mutations. |
-| [`forgePlugin.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgePlugin.ts) | `pluginSetupHandler` | Resolves a registered plugin for the selected agent, declares credentials and installer requirements, installs, and validates its receipt. |
+| [`forgePlugin.ts`](https://github.com/stripe/forge/blob/main/src/setup/forgePlugin.ts) | `pluginSetupHandler` | Resolves a registered plugin name, delegates support to installer preflight, declares credentials and requirements, installs, and validates its receipt. |
 | [`resolution.ts`](https://github.com/stripe/forge/blob/main/src/setup/resolution.ts) | `normalizeSetupStepResolution` | Enforces bounded canonical JSON for dynamic action resolutions before `setup.json`. |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/setup/index.ts) | Public setup barrel | Exposes bundle APIs, handlers, executor types, and errors |
 
@@ -670,8 +670,11 @@ tree receipt.
 `plugins.ts` installs the standard Stripe bundle at the official catalog's source
 pin. `pluginConfig.ts` validates its manifest and MCP declaration and merges the
 native configuration with the generated model definition. These use the shared
-plugin credential policy and tree fingerprinting; the receipt variant records
-the actual standard-bundle source path.
+plugin credential policy and tree fingerprinting; the neutral bundle receipt
+records the adapter-owned source path. `pluginActivation.ts` owns the bounded,
+fixed-path activation protocol: prepare initializes it, installation activates
+Stripe after fingerprinting, and session open validates and snapshots it without
+inspecting setup action names.
 
 `index.ts` owns routing, isolated state, version verification, stdin execution,
 exact-session resumption, and pre-quiescence exports. It generates model config
@@ -777,7 +780,8 @@ The verifier deliberately imports:
 - turn coverage from `evidence/selection.ts`;
 - ATIF parsing from `atif`;
 - judge projection policy from `evaluation`; and
-- plugin receipt validation from `contracts`.
+- strict plugin receipt validation from `contracts`, preserving historical wire
+  shapes and interpreting installation kind separately from adapter identity.
 
 Those dependencies make verification a second semantic boundary rather than a
 generic checksum utility.

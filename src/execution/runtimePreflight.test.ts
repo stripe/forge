@@ -149,7 +149,7 @@ describe('runtime composition preflight', () => {
     assert.equal(fake.runs.length, 0);
   });
 
-  it('rejects unsupported named-plugin agents before credentials, installation, or runtime preparation', async () => {
+  it('lets the installer reject a distribution before credentials or runtime preparation', async () => {
     const runtime = createFakeRuntimeAdapter({ id: selected.adapter });
     const current = fixture(runtime.adapter);
     const baseAgent = current.composition.agents.get('test-agent')!;
@@ -166,7 +166,7 @@ describe('runtime composition preflight', () => {
               preflight() {
                 installerCalled = true;
                 throw new Error(
-                  'Unsupported plugin must not reach the installer.',
+                  'Installer does not support this distribution.',
                 );
               },
             },
@@ -182,7 +182,7 @@ describe('runtime composition preflight', () => {
     await assert.rejects(
       executeEval({ runId: 'unsupported-plugin', plan, composition }),
     );
-    assert.equal(installerCalled, false);
+    assert.equal(installerCalled, true);
     assert.deepEqual(current.resolutions, []);
     assert.equal(runtime.runs.length, 0);
   });

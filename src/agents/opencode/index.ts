@@ -24,6 +24,10 @@ import {
 } from './layout.ts';
 import { EXPORT_PATH, MAX_NATIVE_BYTES } from './native.ts';
 import {
+  initializePluginActivation,
+  readPluginActivation,
+} from './pluginActivation.ts';
+import {
   mergeStripeOpenCodeConfiguration,
   PLUGIN_CONFIG_PATH,
 } from './pluginConfig.ts';
@@ -159,6 +163,9 @@ export function createOpenCodeAdapter(
         throw new Error(
           'OpenCode runtime version does not match the adapter pin.',
         );
+      await initializePluginActivation(
+        context.runtime.stateDirectories.get(OPENCODE_STATE_ID)!,
+      );
     },
     async openSession(context): Promise<AgentSession> {
       const required = requirements(context.selection);
@@ -167,7 +174,11 @@ export function createOpenCodeAdapter(
       if (!state)
         throw new TypeError('OpenCode run-owned state is unavailable.');
       let config = required.environment.variables!.OPENCODE_CONFIG_CONTENT!;
-      if (context.plan.setup.some((step) => step.uses === 'forge/plugin')) {
+      if (await readPluginActivation(state)) {
+        if ((await state.inspect(PLUGIN_CONFIG_PATH)).kind !== 'file')
+          throw new Error(
+            'OpenCode plugin configuration must be a regular file.',
+          );
         config = mergeStripeOpenCodeConfiguration(
           config,
           new TextDecoder('utf-8', { fatal: true }).decode(

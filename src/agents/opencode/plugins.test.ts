@@ -3,12 +3,16 @@ import { describe, it } from 'vitest';
 import type { CommandRunner } from '../../contracts/command.ts';
 import { parseAgentPluginInstallationReceipt } from '../../contracts/pluginReceipt.ts';
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
-import { pluginDefinitionForAgent } from '../../model/plugins.ts';
+import { pluginDefinitionForName } from '../../model/plugins.ts';
 import {
   createMemoryWorkspace,
   createTestResolvedRunPlan,
 } from '../../testing/index.ts';
 import { OPENCODE_STATE_ID, resolveOpenCodeLayout } from './layout.ts';
+import {
+  PLUGIN_ACTIVATION_PATH,
+  readPluginActivation,
+} from './pluginActivation.ts';
 import {
   mergeStripeOpenCodeConfiguration,
   PLUGIN_CONFIG_PATH,
@@ -63,7 +67,11 @@ const files = {
 };
 
 function fixture(
-  options: { checkoutCommit?: string; files?: Record<string, string> } = {},
+  options: {
+    checkoutCommit?: string;
+    files?: Record<string, string>;
+    adapterId?: string;
+  } = {},
 ) {
   const state = createMemoryWorkspace(
     Object.fromEntries(
@@ -89,13 +97,13 @@ function fixture(
       return { stdout, stderr: '', exitCode: 0, durationMs: 0 };
     },
   };
-  const definition = pluginDefinitionForAgent('stripe', 'opencode')!;
+  const definition = pluginDefinitionForName('stripe')!;
   const prepared = createOpenCodePluginInstaller({
-    adapterId: 'opencode',
+    adapterId: options.adapterId ?? 'opencode',
     layout,
   }).preflight(definition.distribution, {
     selection: {
-      adapter: 'opencode',
+      adapter: options.adapterId ?? 'opencode',
       provider: 'openai-compatible',
       model: 'test',
     },
@@ -125,7 +133,8 @@ describe('OpenCode Stripe bundle installation', () => {
     const test = fixture();
     assert.equal(test.calls.length, 0);
     const receipt = await test.install();
-    assert.equal(receipt.installation, 'opencode-bundle');
+    assert.equal(receipt.installation, 'bundle');
+    assert.equal(await readPluginActivation(test.state.readonly), true);
     assert.equal(receipt.marketplace_commit, catalogCommit);
     assert.equal(receipt.version, manifest.version);
     assert.deepEqual(receipt.source, {
@@ -181,12 +190,40 @@ describe('OpenCode Stripe bundle installation', () => {
       );
   });
 
+  it('activates a custom adapter ID through its prepared installer', async () => {
+    const test = fixture({ adapterId: 'custom-opencode' });
+    const receipt = await test.install();
+    assert.equal(receipt.adapter, 'custom-opencode');
+    assert.equal(await readPluginActivation(test.state.readonly), true);
+    await assert.rejects(test.install(), /already installed/);
+  });
+
+  it('does not publish activation when copying or fingerprinting fails', async () => {
+    const test = fixture();
+    await assert.rejects(
+      test.install({
+        ...test.state.mutable,
+        async readFile(file, options) {
+          if (file.startsWith(PLUGIN_ROOT))
+            throw new Error('Fingerprint failed');
+          return test.state.mutable.readFile(file, options);
+        },
+      }),
+      /Fingerprint failed/,
+    );
+    assert.equal(
+      (await test.state.readonly.inspect(PLUGIN_ACTIVATION_PATH)).kind,
+      'absent',
+    );
+  });
+
   it('fails closed on changed or unpinned catalogs', () => {
     for (const patch of [
       { sha: undefined },
       { sha: 'main' },
       { url: 'https://other.example/repo.git' },
       { path: '../plugin' },
+      { path: 'other/portable-path' },
       { source: 'url' },
     ])
       assert.throws(() =>
@@ -276,7 +313,7 @@ describe('OpenCode Stripe bundle installation', () => {
       { ...receipt, source: { ...receipt.source, commit: 'main' } },
       {
         ...receipt,
-        source: { ...receipt.source, path: 'providers/agent-plugins/plugin' },
+        source: { ...receipt.source, path: '../unsafe' },
       },
     ])
       assert.throws(() => parseAgentPluginInstallationReceipt(changed));

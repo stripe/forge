@@ -26,6 +26,10 @@ import { createOpenCodeAdapter, OPENCODE_STATE_ID } from './index.ts';
 import { OPENCODE_LAUNCHER } from './launcher.ts';
 import { MAX_NATIVE_BYTES } from './native.ts';
 import {
+  PLUGIN_ACTIVATION_PATH,
+  writePluginActivation,
+} from './pluginActivation.ts';
+import {
   PLUGIN_CONFIG_PATH,
   stripeOpenCodeConfiguration,
 } from './pluginConfig.ts';
@@ -52,6 +56,7 @@ async function fixture(
     baseUrl: 'https://gateway.example/v1',
   });
   const state = createMemoryWorkspace();
+  await writePluginActivation(state.mutable, false);
   const workspace = createMemoryWorkspace();
   const calls: { argv: readonly string[]; options: CommandOptions }[] = [];
   const plan = createTestResolvedRunPlan({ agent: selection });
@@ -122,12 +127,9 @@ describe('OpenCode adapter', () => {
       PLUGIN_CONFIG_PATH,
       Buffer.from(JSON.stringify(config)),
     );
-    const plan = createTestResolvedRunPlan({
-      agent: selection,
-      treatment: 'stripe-plugin',
-      treatmentSetup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
-    });
-    const session = await test.adapter.openSession({ ...test.context, plan });
+    await writePluginActivation(test.state.mutable, true);
+    // The plan has no forge/plugin step: activation belongs to adapter state.
+    const session = await test.adapter.openSession(test.context);
     const signal = new AbortController().signal;
     await session.send('Do it', { signal });
     const original = await test.state.readonly.readFile('config.json');
@@ -139,12 +141,89 @@ describe('OpenCode adapter', () => {
       'config.json',
       Buffer.from('{"model":"wrong"}'),
     );
+    await test.state.mutable.writeFile(PLUGIN_CONFIG_PATH, Buffer.from('{}'));
+    await writePluginActivation(test.state.mutable, false);
     await session.send('Continue', { signal });
     assert.deepEqual(
       await test.state.readonly.readFile('config.json'),
       original,
     );
     assert.ok(test.calls.some(({ argv }) => argv.includes('--session')));
+  });
+
+  it('requires bounded exact activation and a valid active fragment before a turn', async () => {
+    const baseline = { format: 'forge-opencode-plugins-v1', plugins: [] };
+    const active = { ...baseline, plugins: ['stripe'] };
+    for (const state of [
+      {},
+      { [PLUGIN_ACTIVATION_PATH]: '{}' },
+      {
+        [PLUGIN_ACTIVATION_PATH]: JSON.stringify({
+          ...baseline,
+          format: 'wrong',
+        }),
+      },
+      {
+        [PLUGIN_ACTIVATION_PATH]: JSON.stringify({
+          ...baseline,
+          plugins: ['unknown'],
+        }),
+      },
+      {
+        [PLUGIN_ACTIVATION_PATH]: JSON.stringify({
+          ...baseline,
+          plugins: ['stripe', 'stripe'],
+        }),
+      },
+      {
+        [PLUGIN_ACTIVATION_PATH]: JSON.stringify({ ...baseline, extra: true }),
+      },
+      { [PLUGIN_ACTIVATION_PATH]: '{}'.padEnd(16 * 1024 + 1) },
+      {
+        [PLUGIN_ACTIVATION_PATH]: JSON.stringify(baseline),
+        [PLUGIN_CONFIG_PATH]: '{}',
+      },
+      { [PLUGIN_ACTIVATION_PATH]: JSON.stringify(active) },
+      {
+        [PLUGIN_ACTIVATION_PATH]: JSON.stringify(active),
+        [PLUGIN_CONFIG_PATH]: '{"model":"override"}',
+      },
+    ]) {
+      const test = await fixture();
+      const invalid = createMemoryWorkspace(state);
+      await assert.rejects(
+        test.adapter.openSession({
+          ...test.context,
+          runtime: {
+            ...test.context.runtime,
+            stateDirectories: new Map([[OPENCODE_STATE_ID, invalid.mutable]]),
+          },
+        }),
+      );
+      assert.equal(test.calls.length, 0);
+    }
+    for (const file of [PLUGIN_ACTIVATION_PATH, PLUGIN_CONFIG_PATH]) {
+      const test = await fixture();
+      await writePluginActivation(test.state.mutable, true);
+      const state = {
+        ...test.state.mutable,
+        async inspect(relative: string) {
+          return relative === file
+            ? { path: relative, kind: 'symlink' as const }
+            : test.state.mutable.inspect(relative);
+        },
+      };
+      await assert.rejects(
+        test.adapter.openSession({
+          ...test.context,
+          runtime: {
+            ...test.context.runtime,
+            stateDirectories: new Map([[OPENCODE_STATE_ID, state]]),
+          },
+        }),
+        /regular file/,
+      );
+    }
   });
 
   it('declares only explicit Chat Completions routing, isolated state, and its credential', () => {
@@ -206,7 +285,28 @@ describe('OpenCode adapter', () => {
   });
   it('verifies the exact executable version without credentials', async () => {
     const test = await fixture();
-    await test.adapter.prepare(test.prepare);
+    const fresh = createMemoryWorkspace();
+    const prepare = {
+      ...test.prepare,
+      runtime: {
+        ...test.prepare.runtime,
+        stateDirectories: new Map([[OPENCODE_STATE_ID, fresh.mutable]]),
+      },
+    };
+    await test.adapter.prepare(prepare);
+    assert.deepEqual(
+      JSON.parse(
+        Buffer.from(
+          await fresh.readonly.readFile(PLUGIN_ACTIVATION_PATH),
+        ).toString(),
+      ),
+      { format: 'forge-opencode-plugins-v1', plugins: [] },
+    );
+    assert.equal(
+      (await fresh.readonly.inspect('plugins/stripe')).kind,
+      'absent',
+    );
+    await assert.rejects(test.adapter.prepare(prepare), /already exists/);
     assert.deepEqual(test.calls[0]!.argv, ['opencode', '--version']);
     for (const output of [
       result('1.18.0'),
@@ -491,6 +591,7 @@ describe('OpenCode adapter', () => {
         ),
       );
       if (treatment === 'stripe-plugin') {
+        await writePluginActivation(test.state.mutable, true);
         await test.state.mutable.writeFile(
           PLUGIN_CONFIG_PATH,
           Buffer.from(

@@ -28,7 +28,7 @@ import {
   type ResolvedRunPlanV1,
 } from '../model/index.ts';
 import { isSafeDatasetRelativePath } from '../model/paths.ts';
-import { pluginDefinitionForAgent } from '../model/plugins.ts';
+import { pluginDefinitionForName } from '../model/plugins.ts';
 import { serializeResolvedRunPlan } from '../planning/index.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
 import { assertCompatibleForgeVersion } from '../version.ts';
@@ -487,6 +487,16 @@ function verifyCanonicalArtifactInventory(
   }
 }
 
+/** Interpret accepted wire generations only after validating the saved bytes. */
+function pluginInstallationKind(
+  receipt: ReturnType<typeof parseAgentPluginInstallationReceipt>,
+): 'native' | 'bundle' {
+  return receipt.installation === 'bundle' ||
+    receipt.installation === 'opencode-bundle'
+    ? 'bundle'
+    : 'native';
+}
+
 function verifySetupArtifact(
   result: RunResult,
   plan: ResolvedRunPlanV1,
@@ -529,9 +539,8 @@ function verifySetupArtifact(
         );
       }
       const planned = plan.setup[index] as PluginSetupStepV1;
-      const distribution = pluginDefinitionForAgent(
+      const distribution = pluginDefinitionForName(
         planned.with.plugin,
-        plan.agent.adapter,
       )?.distribution;
       const requestedName =
         distribution === undefined
@@ -549,9 +558,8 @@ function verifySetupArtifact(
         receipt.adapter !== plan.agent.adapter ||
         receipt.plugin !== distribution.plugin ||
         receipt.marketplace !== distribution.marketplace ||
-        (plan.agent.adapter === 'opencode'
-          ? receipt.installation !== 'opencode-bundle'
-          : receipt.installation !== undefined || nativeName !== requestedName)
+        (pluginInstallationKind(receipt) === 'native' &&
+          nativeName !== requestedName)
       ) {
         throw new ArtifactStoreError(
           'Plugin installation resolution does not match the completed run plan.',

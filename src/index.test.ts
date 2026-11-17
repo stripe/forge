@@ -5,6 +5,8 @@ import * as rootExports from './index.ts';
 
 import {
   type AgentAdapter,
+  type AgentPluginInstallationReceipt,
+  type BundleAgentPluginInstallationReceipt,
   createArtifactStore,
   createForgeEngine,
   createJudgeTranscriptProjection,
@@ -28,7 +30,9 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   type JudgeEvidenceV1,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
+  type NativeAgentPluginInstallationReceipt,
   normalizeEnvironmentSpecification,
+  type OpenCodeBundleInstallationReceipt,
   parseAgentPluginInstallationReceipt,
   parseInteractionArtifact,
   parseJudgeEvidence,
@@ -44,6 +48,49 @@ import {
 } from './index.ts';
 
 describe('@stripe/forge package root', () => {
+  it('exports neutral receipt types and historical authoring types', () => {
+    const common = {
+      adapter: 'custom',
+      plugin: 'test@marketplace',
+      marketplace: 'owner/repo',
+      marketplace_commit: 'a'.repeat(40),
+      version: '1.0.0',
+      installed_tree: {
+        format: 'forge-plugin-tree-v1',
+        sha256: `sha256:${'b'.repeat(64)}`,
+        entry_count: 1,
+        file_count: 1,
+        size_bytes: 1,
+      },
+    } as const;
+    const native: NativeAgentPluginInstallationReceipt = {
+      ...common,
+      native_plugin_id: 'test@marketplace',
+      source: { kind: 'archive' },
+    };
+    const bundle: BundleAgentPluginInstallationReceipt = {
+      ...common,
+      installation: 'bundle',
+      source: {
+        kind: 'git-subdir',
+        commit: 'c'.repeat(40),
+        path: 'portable/plugin',
+      },
+    };
+    const historical: OpenCodeBundleInstallationReceipt = {
+      ...bundle,
+      installation: 'opencode-bundle',
+      source: { ...bundle.source, path: 'providers/claude/plugin' },
+    };
+    const receipts: AgentPluginInstallationReceipt[] = [
+      native,
+      bundle,
+      historical,
+    ];
+    for (const receipt of receipts)
+      assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
+  });
+
   it('keeps image build helpers on the Docker subpath', async () => {
     assert.equal('defineDockerImageBuild' in rootExports, false);
     const docker = await import('./runtime/docker/index.ts');

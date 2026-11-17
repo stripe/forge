@@ -192,6 +192,7 @@ export function createClaudePluginInstaller(
             plugin: selected.plugin,
             marketplace: selected.marketplace,
             marketplace_commit: marketplaceCommit,
+            installation: 'native',
             native_plugin_id: nativePluginId,
             version: installed.version,
             source: pluginSourceReceipt(entry.source, sourceCommit),

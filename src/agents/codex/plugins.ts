@@ -294,6 +294,7 @@ export function createCodexPluginInstaller(options: {
             plugin: selected.plugin,
             marketplace: selected.marketplace,
             marketplace_commit: commit,
+            installation: 'native',
             native_plugin_id: selected.plugin,
             version: installed.version,
             source: Object.freeze({ kind: source.kind }),

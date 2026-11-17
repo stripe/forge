@@ -16,14 +16,9 @@ const STRIPE_PLUGIN: PluginDefinition = Object.freeze({
 });
 
 /** One code-owned mapping shared by setup, credentials, and receipt verification. */
-export function pluginDefinitionForAgent(
+export function pluginDefinitionForName(
   plugin: PluginSetupWithV1['plugin'],
-  adapter: string,
 ): PluginDefinition | undefined {
-  if (
-    plugin === 'stripe' &&
-    (adapter === 'claude-code' || adapter === 'codex' || adapter === 'opencode')
-  )
-    return STRIPE_PLUGIN;
+  if (plugin === 'stripe') return STRIPE_PLUGIN;
   return undefined;
 }

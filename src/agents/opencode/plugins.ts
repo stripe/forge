@@ -1,9 +1,9 @@
 import type {
   AgentPluginInstaller,
-  OpenCodeBundleInstallationReceipt,
+  BundleAgentPluginInstallationReceipt,
 } from '../../contracts/plugin.ts';
 import type { MutableWorkspace } from '../../contracts/runtime.ts';
-import { pluginDefinitionForAgent } from '../../model/plugins.ts';
+import { pluginDefinitionForName } from '../../model/plugins.ts';
 import { inspectInstalledPluginTree } from '../pluginTree.ts';
 import {
   assertOpenCodeRuntimeLayout,
@@ -11,6 +11,11 @@ import {
   type OpenCodeLayout,
 } from './layout.ts';
 import { parseJson, record } from './native.ts';
+import {
+  PLUGIN_ACTIVATION_PATH,
+  readPluginActivation,
+  writePluginActivation,
+} from './pluginActivation.ts';
 import {
   BUNDLE_SOURCE_PATH,
   PLUGIN_CONFIG_PATH,
@@ -32,10 +37,7 @@ export function createOpenCodePluginInstaller(options: {
   return Object.freeze({
     supportsMcpBearerAuth: true as const,
     preflight(distribution, context) {
-      const registered = pluginDefinitionForAgent(
-        'stripe',
-        'opencode',
-      )!.distribution;
+      const registered = pluginDefinitionForName('stripe')!.distribution;
       if (
         context.selection.adapter !== options.adapterId ||
         distribution.plugin !== registered.plugin ||
@@ -60,13 +62,18 @@ export function createOpenCodePluginInstaller(options: {
           stateDirectories,
           commands,
           signal,
-        }): Promise<OpenCodeBundleInstallationReceipt> {
+        }): Promise<BundleAgentPluginInstallationReceipt> {
           assertOpenCodeRuntimeLayout(layout, paths);
           const state = stateDirectories.get(OPENCODE_STATE_ID);
           if (!state || stateDirectories.size !== 1)
             throw new Error('OpenCode plugin state is unavailable.');
           if ((await state.inspect(PLUGIN_ROOT)).kind !== 'absent')
             throw new Error('Stripe plugin is already installed in this run.');
+          if (
+            (await state.inspect(PLUGIN_ACTIVATION_PATH)).kind !== 'absent' &&
+            (await readPluginActivation(state))
+          )
+            throw new Error('Stripe plugin is already active in this run.');
           const git = async (directory: string, args: readonly string[]) => {
             signal.throwIfAborted();
             const result = await commands.run(
@@ -162,22 +169,26 @@ export function createOpenCodePluginInstaller(options: {
             Buffer.from(JSON.stringify(configuration)),
             { mode: 0o600 },
           );
+          const installedTree = await inspectInstalledPluginTree(
+            state,
+            PLUGIN_ROOT,
+            signal,
+          );
+          signal.throwIfAborted();
+          await writePluginActivation(state, true);
+          signal.throwIfAborted();
           return Object.freeze({
             adapter: options.adapterId,
             ...selected,
             marketplace_commit: catalogCommit,
-            installation: 'opencode-bundle',
+            installation: 'bundle',
             version,
             source: Object.freeze({
               kind: 'git-subdir',
               commit: sourceCommit,
               path: BUNDLE_SOURCE_PATH,
             }),
-            installed_tree: await inspectInstalledPluginTree(
-              state,
-              PLUGIN_ROOT,
-              signal,
-            ),
+            installed_tree: installedTree,
           });
         },
       };

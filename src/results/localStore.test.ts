@@ -26,6 +26,23 @@ import type {
   RunResultV1,
 } from './types.ts';
 
+const PLUGIN_RECEIPT = {
+  adapter: 'claude-code',
+  plugin: 'stripe@claude-plugins-official',
+  marketplace: 'anthropics/claude-plugins-official',
+  marketplace_commit: 'a'.repeat(40),
+  native_plugin_id: 'stripe@forge-test',
+  version: '0.9.2',
+  source: { kind: 'git-subdir', commit: 'b'.repeat(40) },
+  installed_tree: {
+    format: 'forge-plugin-tree-v1',
+    sha256: `sha256:${'c'.repeat(64)}`,
+    entry_count: 2,
+    file_count: 1,
+    size_bytes: 42,
+  },
+} as const;
+
 const roots: string[] = [];
 const testPlan = createTestResolvedRunPlan({
   caseId: 'sample/case',
@@ -1154,22 +1171,7 @@ describe('local artifact store', () => {
       ],
       agent: { adapter: 'claude-code', provider: 'anthropic', model: 'test' },
     });
-    const receipt = {
-      adapter: 'claude-code',
-      plugin: 'stripe@claude-plugins-official',
-      marketplace: 'anthropics/claude-plugins-official',
-      marketplace_commit: 'a'.repeat(40),
-      native_plugin_id: 'stripe@forge-test',
-      version: '0.9.2',
-      source: { kind: 'git-subdir', commit: 'b'.repeat(40) },
-      installed_tree: {
-        format: 'forge-plugin-tree-v1',
-        sha256: `sha256:${'c'.repeat(64)}`,
-        entry_count: 2,
-        file_count: 1,
-        size_bytes: 42,
-      },
-    } as const;
+    const receipt = PLUGIN_RECEIPT;
     const core = [
       { path: 'interaction.json', body: jsonBody(oneShotInteraction) },
       { path: 'trajectory.json', body: oneShotTrajectory },
@@ -1210,7 +1212,7 @@ describe('local artifact store', () => {
       { plan: openCodePlan },
     );
     await verifyCompletedRun(openCodeLocation);
-    const wrongInstallation = await commitArtifacts(
+    const nativeOpenCode = await commitArtifacts(
       [
         ...core,
         {
@@ -1221,10 +1223,7 @@ describe('local artifact store', () => {
       (result) => result,
       { plan: openCodePlan },
     );
-    await assert.rejects(
-      verifyCompletedRun(wrongInstallation),
-      /does not match the completed run plan/,
-    );
+    await verifyCompletedRun(nativeOpenCode);
     {
       const actual = await verifyCompletedRun(valid);
       assert.ok(actual);
@@ -1290,6 +1289,115 @@ describe('local artifact store', () => {
       /does not match the completed run plan/,
     );
   });
+
+  for (const adapter of ['claude-code', 'opencode', 'custom-opencode']) {
+    // Read both wire generations under the existing Forge release gate, and
+    // leave original companion bytes and result descriptors untouched.
+    it(`verifies original current and historical plugin bytes for ${adapter}`, async () => {
+      const receipt = PLUGIN_RECEIPT;
+      const { native_plugin_id: _id, ...bundleBase } = receipt;
+      const bundleReceipt = {
+        ...bundleBase,
+        installation: 'opencode-bundle',
+        source: {
+          kind: 'git-subdir',
+          commit: 'b'.repeat(40),
+          path: 'providers/claude/plugin',
+        },
+      };
+      const core = [
+        { path: 'interaction.json', body: jsonBody(oneShotInteraction) },
+        { path: 'trajectory.json', body: oneShotTrajectory },
+      ];
+      const setup = (resolution: unknown) =>
+        jsonBody({ steps: [{ index: 0, uses: 'forge/plugin', resolution }] });
+      const plan = createTestResolvedRunPlan({
+        agent: { adapter, provider: 'test', model: 'test' },
+        treatment: 'stripe-plugin',
+        treatmentSetup: [{ uses: 'forge/plugin', with: { plugin: 'stripe' } }],
+      });
+      for (const resolution of [
+        { ...receipt, adapter },
+        { ...receipt, adapter, installation: 'native' },
+        {
+          ...receipt,
+          adapter,
+          mcp_configuration: 'codex-user-config',
+          mcp_connections: [{ name: 'stripe', url: 'https://mcp.stripe.com' }],
+        },
+        {
+          ...receipt,
+          adapter,
+          installation: 'native',
+          mcp_configuration: 'codex-user-config',
+          mcp_connections: [{ name: 'stripe', url: 'https://mcp.stripe.com' }],
+        },
+        { ...bundleReceipt, adapter },
+        {
+          ...bundleReceipt,
+          adapter,
+          installation: 'bundle',
+          source: { ...bundleReceipt.source, path: 'another/portable/bundle' },
+        },
+      ]) {
+        const body = setup(resolution);
+        const location = await commitArtifacts(
+          [...core, { path: 'setup.json', body }],
+          (result) => result,
+          { plan },
+        );
+        const resultBytes = await fs.readFile(
+          path.join(location, 'result.json'),
+        );
+        const planBytes = await fs.readFile(path.join(location, 'plan.json'));
+        await verifyCompletedRun(location);
+        assert.deepEqual(
+          await fs.readFile(path.join(location, 'setup.json')),
+          body,
+        );
+        assert.deepEqual(
+          await fs.readFile(path.join(location, 'result.json')),
+          resultBytes,
+        );
+        assert.deepEqual(
+          await fs.readFile(path.join(location, 'plan.json')),
+          planBytes,
+        );
+      }
+      if (adapter !== 'custom-opencode') return;
+      for (const resolution of [
+        { ...receipt, adapter: 'other-adapter' },
+        {
+          ...receipt,
+          adapter,
+          installation: 'native',
+          native_plugin_id: 'other@marketplace',
+        },
+        { ...bundleReceipt, adapter, plugin: 'other@marketplace' },
+        {
+          ...bundleReceipt,
+          adapter,
+          installation: 'bundle',
+          source: { ...bundleReceipt.source, path: '../unsafe' },
+        },
+        {
+          ...bundleReceipt,
+          adapter,
+          native_plugin_id: receipt.native_plugin_id,
+        },
+      ]) {
+        const location = await commitArtifacts(
+          [...core, { path: 'setup.json', body: setup(resolution) }],
+          (result) => result,
+          { plan },
+        );
+        await assert.rejects(
+          verifyCompletedRun(location),
+          /plugin installation resolution|does not match the completed run plan/,
+        );
+      }
+    });
+  }
 
   it('rejects fabricated resolutions for credential declarations', async () => {
     const plan = createTestResolvedRunPlan({

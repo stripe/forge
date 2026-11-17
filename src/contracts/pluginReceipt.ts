@@ -4,6 +4,7 @@ import {
   isSafeMcpEndpointUrl,
   isSafeSimpleIdentifier,
   isSafeVersion,
+  isSafeWorkspaceRelativePath,
 } from '../model/paths.ts';
 import type { AgentPluginInstallationReceipt } from './plugin.ts';
 
@@ -11,16 +12,21 @@ import type { AgentPluginInstallationReceipt } from './plugin.ts';
 export function parseAgentPluginInstallationReceipt(
   input: unknown,
 ): AgentPluginInstallationReceipt {
+  if (!isPlainRecord(input)) {
+    throw new TypeError('Agent plugin installation receipt is invalid.');
+  }
+  const hasInstallation = Object.hasOwn(input, 'installation');
+  const bundle =
+    input.installation === 'bundle' || input.installation === 'opencode-bundle';
   if (
-    !isPlainRecord(input) ||
+    (hasInstallation && input.installation !== 'native' && !bundle) ||
     !hasExactKeys(input, [
       'adapter',
       'plugin',
       'marketplace',
       'marketplace_commit',
-      input.installation === 'opencode-bundle'
-        ? 'installation'
-        : 'native_plugin_id',
+      ...(hasInstallation ? ['installation'] : []),
+      ...(bundle ? [] : ['native_plugin_id']),
       'version',
       'source',
       'installed_tree',
@@ -37,7 +43,7 @@ export function parseAgentPluginInstallationReceipt(
     !isSafeGitHubRepository(input.marketplace) ||
     typeof input.marketplace_commit !== 'string' ||
     !isFullGitCommit(input.marketplace_commit) ||
-    (input.installation !== 'opencode-bundle' &&
+    (!bundle &&
       (typeof input.native_plugin_id !== 'string' ||
         !isQualifiedPluginId(input.native_plugin_id))) ||
     typeof input.version !== 'string' ||
@@ -63,9 +69,8 @@ export function parseAgentPluginInstallationReceipt(
         }
       : {}),
   };
-  if (input.installation === 'opencode-bundle') {
-    if (relocated)
-      throw new TypeError('OpenCode bundle receipt cannot relocate MCP.');
+  if (bundle) {
+    if (relocated) throw new TypeError('Bundle receipt cannot relocate MCP.');
     const source = input.source;
     if (
       !isPlainRecord(source) ||
@@ -73,21 +78,25 @@ export function parseAgentPluginInstallationReceipt(
       source.kind !== 'git-subdir' ||
       typeof source.commit !== 'string' ||
       !isFullGitCommit(source.commit) ||
-      source.path !== 'providers/claude/plugin'
+      typeof source.path !== 'string' ||
+      (input.installation === 'opencode-bundle'
+        ? source.path !== 'providers/claude/plugin'
+        : !isSafeWorkspaceRelativePath(source.path))
     )
-      throw new TypeError('OpenCode bundle source receipt is invalid.');
+      throw new TypeError('Bundle source receipt is invalid.');
     return Object.freeze({
       ...common,
-      installation: 'opencode-bundle',
+      installation: input.installation as 'bundle' | 'opencode-bundle',
       source: Object.freeze({
         kind: source.kind,
         commit: source.commit,
         path: source.path,
       }),
-    });
+    }) as AgentPluginInstallationReceipt;
   }
   return Object.freeze({
     ...common,
+    ...(hasInstallation ? { installation: 'native' as const } : {}),
     native_plugin_id: input.native_plugin_id as string,
     source: parsePluginSourceReceipt(input.source),
   });
