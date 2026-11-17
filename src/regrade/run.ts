@@ -5,6 +5,7 @@ import type { AtifTrajectoryV1_8 } from '../atif/types.ts';
 import type { CompletionProviderCollection } from '../contracts/composition.ts';
 import type { CredentialResolver } from '../contracts/credentials.ts';
 import { defaultForgeEngine, type ForgeEngine } from '../engine.ts';
+import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   type CriterionJudgeExecutionOptions,
   type CriterionJudgeInput,
@@ -18,6 +19,10 @@ import {
   prepareCompletionRuntime,
 } from '../execution/completionRuntime.ts';
 import { sha256Digest } from '../model/hashes.ts';
+import type {
+  DecisionJudgeMethod,
+  DecisionJudgeMode,
+} from '../model/judgeMethod.ts';
 import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.ts';
 import { parseEvaluationResult, parseJudgeEvidence } from '../results/parse.ts';
 import type {
@@ -25,6 +30,7 @@ import type {
   CompletionCallTotalsV1,
   EvaluationResultV1,
   JudgeEvidenceV1,
+  RunEvidenceV1,
   RunResultV1,
 } from '../results/types.ts';
 import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
@@ -37,6 +43,10 @@ export interface RegradeResultV1 {
   readonly run_id: string;
   /** The judge used for this regrade. */
   readonly judge: ModelRefV1;
+  /** How the judge answered; absent for the default pass/fail judge. */
+  readonly judge_mode?: DecisionJudgeMode;
+  /** Candidate count of a sampling judge; absent otherwise. */
+  readonly judge_candidates?: number;
   /** Digests of the exact saved inputs, so a regrade is tied to one committed run. */
   readonly source: {
     readonly result_sha256: string;
@@ -64,6 +74,8 @@ export interface SavedJudgeInputs {
   readonly plan: ResolvedRunPlanV1;
   readonly trajectory: AtifTrajectoryV1_8;
   readonly judgeEvidence: JudgeEvidenceV1;
+  /** The run's recorded trajectory completeness; absent means unknown. */
+  readonly evidence?: Pick<RunEvidenceV1, 'completeness' | 'warnings'>;
 }
 
 /**
@@ -80,6 +92,13 @@ export function judgeInputFromSavedRun(
   return {
     transcript: createJudgeTranscriptProjection(saved.trajectory),
     criteria: saved.plan.evaluation.judging_criteria,
+    evidenceWarnings: criterionEvidenceWarnings({
+      trajectory: saved.evidence ?? {
+        completeness: 'partial',
+        warnings: [],
+      },
+      workspace: saved.judgeEvidence.workspace,
+    }),
     ...(saved.plan.evaluation.example_answer === undefined
       ? {}
       : { exampleAnswer: saved.plan.evaluation.example_answer }),
@@ -97,6 +116,8 @@ export async function regradeCompletedRun(
   input: {
     readonly location: string;
     readonly judge: ModelRefV1;
+    /** Judge by this method instead of the default pass/fail judgment. */
+    readonly judgeMethod?: DecisionJudgeMethod;
     readonly signal?: AbortSignal;
     readonly now?: () => Date;
     /** Clock, jitter, and sleep for judge retries; defaults to the wall clock. */
@@ -144,8 +165,14 @@ export async function regradeCompletedRun(
     credentialResolver: dependencies.credentialResolver,
     signal,
   });
+  const judgeInput = judgeInputFromSavedRun({
+    plan,
+    trajectory,
+    judgeEvidence,
+    evidence: result.evidence,
+  });
   const criteria = await judgeCriteria(
-    { ...judgeInputFromSavedRun({ plan, trajectory, judgeEvidence }), signal },
+    { ...judgeInput, signal },
     async (request, attempt) =>
       (
         await completions.invoke(
@@ -157,6 +184,9 @@ export async function regradeCompletedRun(
       ).content,
     {
       ...input.completionRetry,
+      ...(input.judgeMethod === undefined
+        ? {}
+        : { judgeMethod: input.judgeMethod }),
       redactionSecrets: completions.secrets,
       onRetryDecision: completions.recordRetryDecision,
       ...(input.waitBeforeJudgeRetry === undefined
@@ -164,19 +194,31 @@ export async function regradeCompletedRun(
         : { waitBeforeRetry: input.waitBeforeJudgeRetry }),
     },
   );
-  const evaluation = scoreEvaluation(criteria, result.evaluation.checks);
+  // Only a method judge records the capture status it saw.
+  const evaluation = scoreEvaluation(
+    criteria,
+    result.evaluation.checks,
+    input.judgeMethod === undefined ? undefined : judgeInput.evidenceWarnings,
+  );
   // The same strict validator committed results pass through.
   parseEvaluationResult(evaluation);
   return Object.freeze({
     format: REGRADE_RESULT_FORMAT,
     run_id: result.run_id,
     judge: Object.freeze({ ...input.judge }),
+    ...judgeMethodRecord(input.judgeMethod),
     source: Object.freeze({
       result_sha256: sha256Digest(
         await fs.readFile(path.join(completed.location, 'result.json')),
       ),
       judge_evidence_sha256: sha256Digest(judgeEvidenceBody),
-      original_judge: plan.evaluation.judge ?? null,
+      original_judge:
+        plan.evaluation.judge === undefined
+          ? null
+          : {
+              provider: plan.evaluation.judge.provider,
+              model: plan.evaluation.judge.model,
+            },
       original_evaluation: Object.freeze({
         status: result.evaluation.status,
         score: result.evaluation.score,
@@ -188,6 +230,16 @@ export async function regradeCompletedRun(
     regraded_at: (input.now ?? (() => new Date()))().toISOString(),
     forge: FORGE_BUILD_IDENTITY,
   });
+}
+
+/** The saved form of a judge method; empty for the default pass/fail judge. */
+export function judgeMethodRecord(method?: DecisionJudgeMethod): {
+  judge_mode?: DecisionJudgeMode;
+  judge_candidates?: number;
+} {
+  return method === undefined
+    ? {}
+    : { judge_mode: method.mode, judge_candidates: method.candidates };
 }
 
 /** Read a claimed artifact and re-check its digest after verification. */

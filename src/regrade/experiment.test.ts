@@ -27,6 +27,22 @@ afterEach(async () => {
   );
 });
 
+const SAMPLING_REPLY = JSON.stringify({
+  answers: {
+    criterion: {
+      type: 'choice',
+      candidates: [
+        {
+          reading: 'The sentence is present.',
+          rationale: 'The conversation supplied the exact status sentence.',
+          label: 'met',
+          probability: 1,
+        },
+      ],
+    },
+  },
+});
+
 const failingJudgment = JSON.stringify({
   results: [{ index: 0, passed: false, explanation: 'Not shown.' }],
 });
@@ -176,6 +192,60 @@ describe('regradeExperimentRun', () => {
       JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
     );
     assert.equal(report.runs[0]!.state, 'pending');
+  });
+
+  it('reuses a regrade only for the same judge method', async () => {
+    const root = await temporaryRoot('forge-regrade-method-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
+    const sampling = (candidates: number) =>
+      ({ mode: 'verbalized-sampling', candidates }) as const;
+    const run = async (
+      output: string,
+      judgeMethod: ReturnType<typeof sampling> | undefined,
+      responses: string[],
+    ) => {
+      const deps = dependencies(responses);
+      const summary = await regradeExperimentRun(
+        {
+          experimentRun: source.experimentLocation,
+          judge,
+          ...(judgeMethod === undefined ? {} : { judgeMethod }),
+          output,
+        },
+        deps.dependencies,
+      );
+      return { summary, calls: deps.scripted.calls.length };
+    };
+    const sampled = path.join(root, 'sampled');
+    const first = await run(sampled, sampling(5), [SAMPLING_REPLY]);
+    assert.equal(first.summary.regraded, 1);
+    assert.equal(first.summary.judge_mode, 'verbalized-sampling');
+    assert.equal(first.summary.judge_candidates, 5);
+    const saved = JSON.parse(
+      await fs.readFile(path.join(sampled, 'runs', 'regrade-source.json'), 'utf8'),
+    );
+    assert.equal(saved.judge_mode, 'verbalized-sampling');
+    assert.equal(saved.judge_candidates, 5);
+
+    const again = await run(sampled, sampling(5), []);
+    assert.equal(again.summary.reused, 1);
+    assert.equal(again.calls, 0);
+    for (const requested of [sampling(3), undefined]) {
+      const refused = await run(sampled, requested, [ORIGINAL_JUDGMENT]);
+      assert.equal(refused.calls, 0);
+      assert.equal(refused.summary.failed.length, 1);
+      assert.match(refused.summary.failed[0]!.message, /different judge, method/);
+    }
+
+    // The default judge's output is never reused by a method request.
+    const plain = path.join(root, 'plain');
+    const base = await run(plain, undefined, [ORIGINAL_JUDGMENT]);
+    assert.equal(Object.hasOwn(base.summary, 'judge_mode'), false);
+    const crossed = await run(plain, sampling(5), [SAMPLING_REPLY]);
+    assert.equal(crossed.calls, 0);
+    assert.match(crossed.summary.failed[0]!.message, /different judge, method/);
   });
 
   it('refuses a second regrade writing to the same output at the same time', async () => {

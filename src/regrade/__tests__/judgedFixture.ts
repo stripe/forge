@@ -29,7 +29,13 @@ export const ORIGINAL_JUDGMENT = JSON.stringify({
  * Execute the multi-turn fixture once through the public CLI with scripted
  * agent, Ava, and judge, leaving a real committed experiment run on disk.
  */
-export async function runJudgedFixture(root: string) {
+export async function runJudgedFixture(
+  root: string,
+  options: {
+    /** Select the sampling judge for the original run, with its reply. */
+    readonly sampling?: { readonly candidates: number; readonly reply: string };
+  } = {},
+) {
   const runtime = createFakeRuntimeAdapter();
   const agent = createScriptedAgentAdapter({
     id: 'claude-code',
@@ -81,16 +87,20 @@ export async function runJudgedFixture(root: string) {
         message: `Use this exact status sentence: ${DELIVERABLE.trim()}`,
       }),
       JSON.stringify({ remaining_need_ids: [], message: '' }),
-      ORIGINAL_JUDGMENT,
+      options.sampling?.reply ?? ORIGINAL_JUDGMENT,
     ],
   });
+  const experiment =
+    options.sampling === undefined
+      ? path.join(FIXTURE_ROOT, 'experiment.yaml')
+      : await samplingExperiment(root, options.sampling.candidates);
   let stdout = '';
   let stderr = '';
   const code = await runCli(
     [
       'run',
       '--experiment',
-      path.join(FIXTURE_ROOT, 'experiment.yaml'),
+      experiment,
       '--output',
       path.join(root, 'results'),
       '--run-id',
@@ -116,15 +126,39 @@ export async function runJudgedFixture(root: string) {
     },
   );
   if (code !== 0) throw new Error(`Fixture run failed: ${stderr}`);
-  const experiment = JSON.parse(stdout) as { location: string };
+  const run = JSON.parse(stdout) as { location: string };
   const judgeCalls = completion.calls.filter(
     (call) => call.request.purpose === 'judge',
   );
   return {
-    experimentLocation: experiment.location,
-    runLocation: path.join(experiment.location, 'runs', 'regrade-source'),
+    experimentLocation: run.location,
+    runLocation: path.join(run.location, 'runs', 'regrade-source'),
     originalJudgeRequests: judgeCalls.map((call) => call.request),
   };
+}
+
+/** The multi-turn fixture's experiment with its judge set to verbalized sampling. */
+async function samplingExperiment(
+  root: string,
+  candidates: number,
+): Promise<string> {
+  const source = await fs.readFile(
+    path.join(FIXTURE_ROOT, 'experiment.yaml'),
+    'utf8',
+  );
+  const judge = '  judge:\n    provider: anthropic\n    model: claude-sonnet-4-6\n';
+  if (!source.includes(judge)) throw new Error('Fixture judge block changed.');
+  const file = path.join(root, 'sampling-experiment.yaml');
+  await fs.writeFile(
+    file,
+    source
+      .replace(
+        judge,
+        `${judge}    mode: verbalized-sampling\n    candidates: ${candidates}\n`,
+      )
+      .replace('path: ./dataset', `path: ${path.join(FIXTURE_ROOT, 'dataset')}`),
+  );
+  return file;
 }
 
 export async function temporaryRoot(prefix: string): Promise<string> {

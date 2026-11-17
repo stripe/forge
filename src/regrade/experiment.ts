@@ -10,9 +10,14 @@ import {
   summarizeReportEvaluation,
 } from '../experimentReport.ts';
 import { sha256Digest } from '../model/hashes.ts';
+import type {
+  DecisionJudgeMethod,
+  DecisionJudgeMode,
+} from '../model/judgeMethod.ts';
 import type { ModelRefV1 } from '../model/types.ts';
 import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
 import {
+  judgeMethodRecord,
   REGRADE_RESULT_FORMAT,
   type RegradeDependencies,
   type RegradeResultV1,
@@ -29,8 +34,11 @@ export interface RegradeExperimentSummaryV1 {
   readonly source_location: string;
   readonly output_location: string;
   readonly judge: ModelRefV1;
+  /** The judge method of this invocation; absent for the default pass/fail judge. */
+  readonly judge_mode?: DecisionJudgeMode;
+  readonly judge_candidates?: number;
   readonly regraded: number;
-  /** Regrades already present for the same judge and committed result. */
+  /** Regrades already present for the same judge, method, and committed result. */
   readonly reused: number;
   /** Completed runs without judging criteria; their checks-only evaluation is unchanged. */
   readonly not_judged: number;
@@ -67,6 +75,8 @@ export async function regradeExperimentRun(
   input: {
     readonly experimentRun: string;
     readonly judge: ModelRefV1;
+    /** Judge by this method instead of the default pass/fail judgment. */
+    readonly judgeMethod?: DecisionJudgeMethod;
     readonly output: string;
     readonly jobs?: number;
     readonly signal?: AbortSignal;
@@ -153,10 +163,11 @@ export async function regradeExperimentRun(
             existing.run_id !== runId ||
             existing.judge.provider !== input.judge.provider ||
             existing.judge.model !== input.judge.model ||
+            !sameJudgeMethod(existing, input.judgeMethod) ||
             existing.source.result_sha256 !== resultSha256
           )
             throw new Error(
-              'An existing regrade in the output uses a different judge or result.',
+              'An existing regrade in the output uses a different judge, method, or result.',
             );
           return { kind: 'reused', regrade: existing };
         }
@@ -164,6 +175,9 @@ export async function regradeExperimentRun(
           {
             location,
             judge: input.judge,
+            ...(input.judgeMethod === undefined
+              ? {}
+              : { judgeMethod: input.judgeMethod }),
             signal,
             now,
             ...(input.completionRetry === undefined
@@ -271,6 +285,7 @@ export async function regradeExperimentRun(
       source_location: source,
       output_location: output,
       judge: Object.freeze({ ...input.judge }),
+      ...judgeMethodRecord(input.judgeMethod),
       regraded: count('regraded'),
       reused: count('reused'),
       not_judged: count('not_judged'),
@@ -297,6 +312,22 @@ export async function regradeExperimentRun(
     );
     return summary;
   }
+}
+
+/**
+ * A saved regrade answers only the request that produced it. A file with no
+ * method is the default pass/fail judge, so it never matches a method request
+ * and a method regrade never matches it.
+ */
+function sameJudgeMethod(
+  saved: Pick<RegradeResultV1, 'judge_mode' | 'judge_candidates'>,
+  requested?: DecisionJudgeMethod,
+): boolean {
+  const wanted = judgeMethodRecord(requested);
+  return (
+    saved.judge_mode === wanted.judge_mode &&
+    saved.judge_candidates === wanted.judge_candidates
+  );
 }
 
 const OUTPUT_LOCK = '.regrade.lock';

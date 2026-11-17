@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { afterEach, describe, it } from 'vitest';
+import { renderTrajectoryCaptureStatus } from '../evaluation/criterionEvidence.ts';
 import { verifyCompletedRun } from '../results/index.ts';
 import {
   createScriptedCompletionProvider,
@@ -158,4 +159,117 @@ describe('regradeCompletedRun', () => {
       /Artifact (does not match its descriptor|is unsafe or exceeds its declared size)/,
     );
   });
+
+  it('records no method and no capture status for the default judge', async () => {
+    const source = await fixture();
+    const regrade = await regradeCompletedRun(
+      {
+        location: source.runLocation,
+        judge: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      },
+      {
+        completionProviders: new Map([
+          ['anthropic', judge([ORIGINAL_JUDGMENT]).provider],
+        ]),
+        credentialResolver: createStaticCredentialResolver(),
+      },
+    );
+    assert.ok(regrade);
+    assert.equal(Object.hasOwn(regrade, 'judge_mode'), false);
+    assert.equal(Object.hasOwn(regrade, 'judge_candidates'), false);
+    assert.equal(Object.hasOwn(regrade.evaluation, 'evidence_warnings'), false);
+  });
+
+  it('judges a saved run by the selected method with the capture status it recorded', async () => {
+    const source = await fixture();
+    const original = await verifyCompletedRun(source.runLocation);
+    const scripted = judge([SAMPLING_REPLY]);
+    const regrade = await regradeCompletedRun(
+      {
+        location: source.runLocation,
+        judge: { provider: 'anthropic', model: 'claude-opus-4-6' },
+        judgeMethod: { mode: 'verbalized-sampling', candidates: 5 },
+      },
+      {
+        completionProviders: new Map([['anthropic', scripted.provider]]),
+        credentialResolver: createStaticCredentialResolver(),
+      },
+    );
+    assert.ok(regrade);
+    assert.equal(regrade.judge_mode, 'verbalized-sampling');
+    assert.equal(regrade.judge_candidates, 5);
+    const request = scripted.calls[0]!.request;
+    assert.equal(request.maxTokens, 4096);
+    assert.match(request.systemPrompt!, /Generate 5 candidate answers/);
+    const criterion = regrade.evaluation.judging_criteria[0]!;
+    assert.equal(criterion.passed, true);
+    assert.equal(criterion.decision?.choice, 'met');
+    assert.equal(criterion.evidence_warnings_ref, 'evaluation');
+    // The status shown is the one recorded with the evaluation, and it comes
+    // from the run's saved evidence: the fixture agent saved no native session.
+    const warnings = regrade.evaluation.evidence_warnings!;
+    assert.ok(
+      warnings.some(
+        ({ source, code }) =>
+          source === 'trajectory' && code === 'source_unavailable',
+      ),
+    );
+    assert.ok(
+      request.systemPrompt!.includes(renderTrajectoryCaptureStatus(warnings)),
+    );
+    assert.deepEqual(regrade.evaluation.checks, original.result.evaluation.checks);
+  });
+
+  it('reproduces the request and evaluation of a run originally judged by sampling', async () => {
+    const root = await temporaryRoot('forge-regrade-sampling-');
+    roots.push(root);
+    const source = await runJudgedFixture(root, {
+      sampling: { candidates: 5, reply: SAMPLING_REPLY },
+    });
+    const original = await verifyCompletedRun(source.runLocation);
+    const scripted = judge([SAMPLING_REPLY]);
+    const regrade = await regradeCompletedRun(
+      {
+        location: source.runLocation,
+        judge: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+        judgeMethod: { mode: 'verbalized-sampling', candidates: 5 },
+      },
+      {
+        completionProviders: new Map([['anthropic', scripted.provider]]),
+        credentialResolver: createStaticCredentialResolver(),
+      },
+    );
+    assert.ok(regrade);
+    const { signal: _a, ...replayed } = scripted.calls[0]!.request;
+    const { signal: _b, ...recorded } = source.originalJudgeRequests[0]!;
+    assert.deepEqual(replayed, recorded);
+    assert.deepEqual(regrade.evaluation, original.result.evaluation);
+    // The source plan names the method; the saved original judge keeps only the model.
+    assert.deepEqual(regrade.source.original_judge, {
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-6',
+    });
+  });
+});
+
+const SAMPLING_REPLY = JSON.stringify({
+  answers: {
+    criterion: {
+      type: 'choice',
+      candidates: [
+        {
+          reading: 'The sentence is present.',
+          rationale: 'The conversation supplied the exact status sentence.',
+          label: 'met',
+          probability: 0.8,
+        },
+        {
+          reading: 'A stricter reading.',
+          rationale: 'The file contents were not shown.',
+          label: 'insufficient_evidence',
+          probability: 0.2,
+        },
+      ],
+    },
+  },
 });
