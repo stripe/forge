@@ -632,10 +632,10 @@ Adapters never write Forge prose into `content`. Forge redacts result text
 before this boundary's limit is applied; oversized text keeps an unmarked prefix
 and Forge sets `truncated: true` (adapter-supplied values are ignored). Across
 one run the ledger retains at most 16,777,216 code units of result text; later
-results keep what remains, possibly nothing, and are marked `truncated`. The interaction
-audit retains the result as `content`, `is_error`, `omission`, and `truncated`;
-turns without results omit it. Judge-visible markers are rendered once, by
-driver fallback.
+results keep what remains, possibly nothing, and are marked `truncated`. The
+interaction audit retains the result as `content`, `is_error`, `omission`, and
+`truncated`; turns without results omit it. Judge-visible markers are rendered
+once, by driver fallback.
 
 One-shot and multi-turn interaction are described separately below.
 
@@ -1085,30 +1085,30 @@ aborts the evidence phase. Optional native detail loss may instead produce
 
 Driver fallback preserves every ordered user prompt and a visible response
 marker for every completed invocation. Assistant text, tool calls, tool
-arguments, and tool results may be deterministically truncated to stay within ATIF
-safety bounds. Fallback retains at most 256 calls across the run, reserving tool
-activity for each turn. Arguments over 4,096 UTF-16 code units, depth 16, or
-128 JSON values become a marked JSON text prefix rather than an empty object.
+arguments, and tool results may be deterministically truncated to stay within
+ATIF safety bounds. Fallback retains at most 256 calls across the run, reserving
+tool activity for each turn. Arguments over 4,096 UTF-16 code units, depth 16,
+or 128 JSON values become a marked JSON text prefix rather than an empty object.
 Unsafe or lossy input values use the judge-visible `forge_omitted_arguments` key
-with an omission marker.
-Available tool-result text retains up to 8,192 code units per call, correlated
-with its invocation and error state. Claude Code supplies root tool-result text (messages with a parent tool ID are
-subagent work and are skipped),
-Codex supplies command and MCP output, and OpenCode supplies tool output or
-errors. A started-only Codex command or MCP call, or an OpenCode call with no
-usable output, has an unavailable marker and makes no claim about success or
-failure unless OpenCode's status reports an error. Native media bytes are omitted
-explicitly. Missing driver results cannot be recovered by fallback. Fallback
-redacts resolved secrets from assistant text, arguments, and results immediately
-before clipping each, after normalizing arguments to JSON, so inputs that are not
-JSON are marked omitted rather than failing the run. Its `redaction_count` covers
-the text it emitted plus tool-result text redacted at the interaction boundary,
-including result text that fallback later clips. Assistant, argument, result, and call-count truncation
-has a visible marker and adds a `value_omitted` warning. Scoring consumes this
-exact bounded trajectory; judging receives its declared root-behavior projection
-subject to the [whole-prompt budget](#judge-visible-projection). If Ava
-fails before any agent turn, the system-only fallback instead identifies
-`role_player_error` and has no agent session ID.
+with an omission marker. Available tool-result text retains up to 8,192 code
+units per call, correlated with its invocation and error state. Claude Code
+supplies root tool-result text (messages with a parent tool ID are subagent work
+and are skipped), Codex supplies command and MCP output, and OpenCode supplies
+tool output or errors. A started-only Codex command or MCP call, or an OpenCode
+call with no usable output, has an unavailable marker and makes no claim about
+success or failure unless OpenCode's status reports an error. Native media bytes
+are omitted explicitly. Missing driver results cannot be recovered by fallback.
+Fallback redacts resolved secrets from assistant text, arguments, and results
+immediately before clipping each, after normalizing arguments to JSON, so inputs
+that are not JSON are marked omitted rather than failing the run. Its
+`redaction_count` covers the text it emitted plus tool-result text redacted at
+the interaction boundary, including result text that fallback later clips.
+Assistant, argument, result, and call-count truncation has a visible marker and
+adds a `value_omitted` warning. Scoring consumes this exact bounded trajectory;
+judging receives its declared root-behavior projection subject to the
+[whole-prompt budget](#judge-visible-projection). If Ava fails before any agent
+turn, the system-only fallback instead identifies `role_player_error` and has no
+agent session ID.
 
 When an adapter captured the exact root-session native source, those bytes remain a
 restricted supplemental artifact even if normalization falls back. The built-in
@@ -1273,7 +1273,11 @@ positive allowlist from the redacted root trajectory:
 - omit agent steps without nonempty message/media or retained tool behavior.
 
 Opaque tool arguments and results remain because they are observable behavior,
-even when a nested key is named `reasoning_content`. Image and audio references
+even when a nested key is named `reasoning_content`. Driver fallback may add
+`forge_truncated_arguments` or `forge_omitted_arguments` argument keys and
+bracketed `[Forge ...]` markers to messages and results. They sit in the judged
+text because tool-call extras are not projected. The judge prompt is unchanged
+and does not describe them, so the judge sees them as ordinary text. Image and audio references
 remain, but their bytes are not loaded into the text-only judge request.
 Tool results without a source-call ID remain visible, with correlation retained
 when supplied. An exact boolean `observation.results[].extra.is_error` is
@@ -1599,7 +1603,8 @@ the producing Forge release. The other core files serve distinct audit roles:
 - `plan.json`: exact canonical declared execution input;
 - `setup.json`: ordered action audit and bounded material setup resolutions;
 - `trajectory.json`: full selected, normalized, redacted ATIF trajectory;
-- `interaction.json`: driver turns, stop reason, and Ava audit;
+- `interaction.json`: driver turns with bounded tool results, stop reason, and
+  Ava audit;
 - `workspace-evidence.json`: exact requested bytes used by deterministic
   checks; and
 - `judge-evidence.json`: exact reduced transcript and workspace evidence made

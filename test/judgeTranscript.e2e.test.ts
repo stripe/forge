@@ -25,16 +25,18 @@ it.each([
   {
     name: 'adapter output above the limit',
     secret: 'synthetic-private-token',
+    redactions: 1,
     content: `${'x'.repeat(MAX_TOOL_RESULT_CODE_UNITS - 45)}synthetic-private-token${'x'.repeat(100)}`,
   },
   {
     name: 'output that grows above the limit during redaction',
     secret: 'zz',
+    redactions: MAX_TOOL_RESULT_CODE_UNITS / 2,
     content: 'zz'.repeat(MAX_TOOL_RESULT_CODE_UNITS / 2),
   },
 ])(
   'bounds $name after redaction without failing the run',
-  async ({ secret, content }) => {
+  async ({ secret, content, redactions }) => {
     const root = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-result-bound-'),
     );
@@ -99,9 +101,10 @@ it.each([
       assert.equal(trajectoryText.includes(secret), false);
       assert.equal(trajectoryText.includes('synthetic-private-'), false);
       assert.match(trajectoryText, /\[Forge truncated the tool result\.\]/);
-      assert.ok(
+      assert.equal(
         (completed.result.evidence as { redaction_count: number })
-          .redaction_count > 0,
+          .redaction_count,
+        redactions,
       );
     } finally {
       await fs.rm(root, { recursive: true, force: true });

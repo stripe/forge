@@ -85,7 +85,9 @@ export interface SecretRedactor {
 }
 
 /** Redact values one at a time, for callers that must redact immediately before a cut. */
-export function createSecretRedactor(secrets: readonly string[]): SecretRedactor {
+export function createSecretRedactor(
+  secrets: readonly string[],
+): SecretRedactor {
   let replacements = 0;
   return {
     text(value) {

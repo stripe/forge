@@ -462,7 +462,7 @@ results/experiments/<experiment-run-id>/
 | `plan.json` | Resolved input for one eval run. |
 | `setup.json` | Ordered, bounded setup receipts. |
 | `trajectory.json` | Normalized, credential-redacted ATIF transcript. |
-| `interaction.json` | Turn history and stop reason, including Ava's private audit data. |
+| `interaction.json` | Turn history, tool calls with bounded results, and stop reason, including Ava's private audit data. |
 
 For the first experiment, print its evaluation:
 
