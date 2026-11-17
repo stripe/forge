@@ -92,6 +92,19 @@ export interface CompletionProvider {
     input: CompletionProviderRequirementInput,
   ): CompletionProviderRequirements;
   preflight?(input: CompletionProviderPreflightInput): Promise<void>;
+  /**
+   * Throw any error to fail the call; the shared retry policy then applies
+   * its fallback schedule. To steer retries, throw a
+   * `CompletionInvocationError` (or an error with a string `code` and an
+   * `observation` of the same shape): an `observation` with
+   * `origin: 'host_transport'` and `http_status` 429, or 503 with
+   * `retry_after_ms`, uses the rate-limit schedule and honors
+   * `retry_after_ms`. HTTP 400, 401, 403, 404,
+   * request-fault `provider_error_code` values, and the codes
+   * `invalid_request`, `invalid_credentials`, and `invalid_output` use the
+   * short schedule. `insufficient_quota` is never retried. Providers must
+   * not retry on their own; the shared policy owns every wait.
+   */
   complete(
     request: CompletionRequest,
     context: CompletionProviderCallContext,
@@ -102,3 +115,10 @@ export interface CompletionProvider {
 export interface CompletionProviderResolver {
   resolve(model: ModelRefV1): CompletionProvider;
 }
+
+export {
+  CompletionInvocationError,
+  type CompletionProviderErrorCode,
+  type CompletionRetryDecision,
+  type CompletionTransportObservation,
+} from './completionObservation.ts';

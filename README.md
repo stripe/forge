@@ -605,6 +605,19 @@ phase, without trusting host-authored diagnostic text. For a committed Ava failu
 `result.json.failure.message` records the final request or output rejection
 reason; raw rejected responses are not saved.
 
+Ava and the judge back off through rate limits and temporary provider failures;
+see the [host completion retry policy](docs/architecture.md#host-side-completion-providers).
+`result.json.completion_calls` keeps bounded records of failed calls even when
+retry succeeds. `completion_call_totals` continues counting after that cap.
+When available, `report.json` includes `rate_limit_wait_ms` in run rows, case
+groups, and the summary. It sums measured host-completion retry waits from the
+latest verified results, including waits from calls omitted by the cap. Parallel
+waits are added, so this total can exceed wall-clock run time. Case groups and
+the summary also carry `rate_limit_wait_runs`, the number of runs that
+contributed a measured value; when it is below `selections`, the total
+undercounts, because older records and attempts without a committed result have
+no measured value.
+
 ### Inspect evidence
 
 Runs may also contain `workspace-evidence.json`, `judge-evidence.json`, and
@@ -655,19 +668,22 @@ report format, and `regrade.json` summarizes the invocation. In the regrade
 report, each regraded row's `regrade_path` (relative to the report's directory)
 points to the evaluation behind its scores. Its `result_path` still points to
 the original execution, relative to the report's `result_root`, which is the
-source experiment run. Rerunning the same command reuses regrades for the same
-judge and committed result, so an interrupted regrade can be continued. An
-output that already holds regrades from another judge reports those runs as
-failed instead of mixing judges. Only one regrade can write to an output at a
-time: a second concurrent invocation fails, naming the output, instead of
-interleaving its results.
+source experiment run. For runs with judging criteria, regrade reports count
+rate-limit waits from the new judge calls only; they do not add waits from the
+source run. Runs that were not judged, and reused older regrades without wait
+records, leave that value absent. Rerunning the same command reuses regrades
+for the same judge and committed result, so an interrupted regrade can be
+continued. An output that already holds regrades from another judge reports
+those runs as failed instead of mixing judges. Only one regrade can write to an
+output at a time: a second concurrent invocation fails, naming the output,
+instead of interleaving its results.
 
-Deterministic file checks are not re-run, because the workspace is gone after
-a run; each regrade keeps the run's original check results. The judge sees
-only the bounded workspace excerpts captured at run time. Runs without judging
-criteria keep their checks-only evaluation. Runs that could not be regraded
-appear as pending in the regrade report, and the command exits with status 1.
-Library hosts can call `regradeCompletedRun` and `regradeExperimentRun` from
+Deterministic file checks are not re-run, because the workspace is gone
+after a run; each regrade keeps the run's original check results. The judge
+sees only the bounded workspace excerpts captured at run time. Runs without
+judging criteria keep their checks-only evaluation. Runs that could not be regraded appear as pending in the regrade
+report, and the command exits with status 1. Library hosts can call
+`regradeCompletedRun` and `regradeExperimentRun` from
 `@stripe/forge/regrade`.
 
 ## Development

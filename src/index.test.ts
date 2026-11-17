@@ -5,6 +5,10 @@ import * as rootExports from './index.ts';
 
 import {
   type AgentAdapter,
+  type CompletionCallTotalsV1,
+  CompletionInvocationError,
+  type CompletionSubattemptRecordV1,
+  type CompletionTransportObservation,
   createArtifactStore,
   createForgeEngine,
   createJudgeTranscriptProjection,
@@ -27,6 +31,7 @@ import {
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   type JudgeEvidenceV1,
+  MAX_COMPLETION_CALL_SUMMARIES,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
   normalizeEnvironmentSpecification,
   parseAgentPluginInstallationReceipt,
@@ -100,6 +105,8 @@ describe('@stripe/forge package root', () => {
     ]) {
       assert.equal(removed in rootExports, false);
     }
+    assert.equal(typeof CompletionInvocationError, 'function');
+    assert.equal(MAX_COMPLETION_CALL_SUMMARIES, 1024);
     assert.equal(typeof FORGE_VERSION, 'string');
     assert.equal(FORGE_BUILD_IDENTITY.version, FORGE_VERSION);
     assert.equal(Object.isFrozen(FORGE_BUILD_IDENTITY), true);
@@ -150,6 +157,9 @@ describe('@stripe/forge package root', () => {
 
     const _acceptsPublicContracts = (
       _agent: AgentAdapter,
+      _transport: CompletionTransportObservation,
+      _subattempt: CompletionSubattemptRecordV1,
+      _totals: CompletionCallTotalsV1,
       _runtime: RuntimeAdapter,
       _composition: ForgeComposition,
       _judgeEvidence: JudgeEvidenceV1,

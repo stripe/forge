@@ -7,6 +7,7 @@ import {
   parseNormalizedTrajectory,
   serializeAtifTrajectory,
 } from '../atif/index.ts';
+import type { CompletionRetryOptions } from '../completionRetry.ts';
 import type {
   AgentAdapter,
   AgentEvidenceIdentity,
@@ -108,6 +109,7 @@ import {
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
 } from '../results/index.ts';
+import type { CompletionCallTotalsV1 } from '../results/types.ts';
 import { boundedErrorMessage } from '../security/errorMessage.ts';
 import {
   assertNoSecrets,
@@ -170,6 +172,11 @@ interface ExecuteEvalTestHooks {
     failedAttempt: number,
     signal: AbortSignal,
   ) => Promise<void>;
+  /** Deterministic clock, jitter, and sleep for Ava and judge retries. */
+  readonly completionRetry?: Pick<
+    CompletionRetryOptions,
+    'now' | 'random' | 'sleep'
+  >;
   /** Injects first-party test actions without exposing a host action registry. */
   readonly setupExecutor?: SetupExecutor;
 }
@@ -316,6 +323,12 @@ export async function executeEvalWithTestHooks(
   const timeoutSignal = AbortSignal.timeout(input.plan.limits.run_timeout_ms);
   const signal = AbortSignal.any([externalSignal, timeoutSignal]);
   const now = input.now ?? (() => new Date());
+  const retryOptions = {
+    ...hooks.completionRetry,
+    deadline:
+      (hooks.completionRetry?.now ?? Date.now)() +
+      input.plan.limits.run_timeout_ms,
+  };
   const startedAt = now();
   const events = createRunEventEmitter(
     input.composition.observer ? [input.composition.observer] : [],
@@ -436,6 +449,7 @@ export async function executeEvalWithTestHooks(
         completions,
         signal,
         hooks.waitBeforeCompletionRetry,
+        retryOptions,
       );
     });
 
@@ -579,12 +593,20 @@ export async function executeEvalWithTestHooks(
               : { workspaceText: safeWorkspaceText }),
             signal,
           },
-          async (request) => {
-            return (await completions.invoke('judge', request, request.signal))
-              .content;
+          async (request, attempt) => {
+            return (
+              await completions.invoke(
+                'judge',
+                request,
+                request.signal,
+                attempt,
+              )
+            ).content;
           },
           {
+            ...retryOptions,
             redactionSecrets: secrets,
+            onRetryDecision: completions.recordRetryDecision,
             validateRequest: (request) =>
               assertJudgePromptWillRemainUnchanged(request, secrets),
             ...(hooks.waitBeforeCompletionRetry === undefined
@@ -659,6 +681,7 @@ export async function executeEvalWithTestHooks(
         runtime: sealed,
         interaction,
         completionCalls: completions.calls,
+        completionCallTotals: completions.totals,
         evidence: evaluated.redacted.evidence,
         redactionCount: evaluated.redacted.replacements,
         evaluation: evaluated.evaluation,
@@ -711,6 +734,7 @@ export async function executeEvalWithTestHooks(
       runtime: sealed,
       interaction,
       completionCalls: completions.calls,
+      completionCallTotals: completions.totals,
       evidence: evaluated.redacted.evidence,
       redactionCount: evaluated.redacted.replacements,
       evaluation: evaluated.evaluation,
@@ -782,6 +806,7 @@ async function executeInteraction(
   completions: PreparedCompletionRuntime,
   signal: AbortSignal,
   waitBeforeCompletionRetry: ExecuteEvalTestHooks['waitBeforeCompletionRetry'],
+  retryOptions: CompletionRetryOptions,
 ): Promise<ExecutedInteraction> {
   let lastTurnSessionId: string | undefined;
   const trackedSession: AgentSession = Object.freeze({
@@ -863,9 +888,12 @@ async function executeInteraction(
         : { initialPrompt: plan.interaction.initial_prompt }),
       signal,
     },
-    (request) => completions.invoke('role_player', request, signal),
+    (request, attempt) =>
+      completions.invoke('role_player', request, signal, attempt),
     {
+      ...retryOptions,
       redactionSecrets: completions.secrets,
+      onRetryDecision: completions.recordRetryDecision,
       ...(waitBeforeCompletionRetry === undefined
         ? {}
         : {
@@ -1929,6 +1957,7 @@ function buildResult(input: {
   runtime: SealedRuntime;
   interaction: ExecutedInteraction;
   completionCalls: readonly CompletionCallSummaryV1[];
+  completionCallTotals: CompletionCallTotalsV1;
   evidence: NormalizedTrajectory;
   redactionCount: number;
   evaluation: EvaluationResultV1;
@@ -1973,6 +2002,7 @@ function buildResult(input: {
       cost_usd: input.interaction.totalCostUsd,
     },
     completion_calls: input.completionCalls.map((call) => ({ ...call })),
+    completion_call_totals: input.completionCallTotals,
     interaction: {
       mode: input.input.plan.interaction.mode,
       turn_count: input.interaction.turns.length,

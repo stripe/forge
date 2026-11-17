@@ -75,6 +75,10 @@ export async function regradeExperimentRun(
       readonly run_id: string;
       readonly state: RegradeOutcome['kind'];
     }) => void;
+    readonly completionRetry?: Parameters<
+      typeof regradeCompletedRun
+    >[0]['completionRetry'];
+    /** @deprecated Use `completionRetry.sleep`. */
     readonly waitBeforeJudgeRetry?: Parameters<
       typeof regradeCompletedRun
     >[0]['waitBeforeJudgeRetry'];
@@ -162,6 +166,9 @@ export async function regradeExperimentRun(
             judge: input.judge,
             signal,
             now,
+            ...(input.completionRetry === undefined
+              ? {}
+              : { completionRetry: input.completionRetry }),
             ...(input.waitBeforeJudgeRetry === undefined
               ? {}
               : { waitBeforeJudgeRetry: input.waitBeforeJudgeRetry }),
@@ -219,11 +226,17 @@ export async function regradeExperimentRun(
         });
         continue;
       }
-      const evaluation =
+      const regrade =
         regraded?.kind === 'regraded' || regraded?.kind === 'reused'
-          ? regraded.regrade.evaluation
-          : (await engine.verifyCompletedRun(outcome.artifact!.location)).result
-              .evaluation;
+          ? regraded.regrade
+          : undefined;
+      const evaluation =
+        regrade?.evaluation ??
+        (await engine.verifyCompletedRun(outcome.artifact!.location)).result
+          .evaluation;
+      // Waits are scoped to this regrade's own judge calls. A run it did not
+      // judge made none, and the source report already holds its waits.
+      const totals = regrade?.completion_call_totals;
       runs.push({
         ...base,
         run_id: outcome.run_id,
@@ -234,6 +247,9 @@ export async function regradeExperimentRun(
           ? { regrade_path: `runs/${outcome.run_id}.json` }
           : {}),
         evaluation: summarizeReportEvaluation(evaluation),
+        ...(totals === undefined
+          ? {}
+          : { rate_limit_wait_ms: totals.rate_limit_wait_ms }),
       });
     }
     const generatedAt = now().toISOString();

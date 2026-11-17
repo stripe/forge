@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-
 import type {
   CompletionProvider,
   CompletionResponse,
 } from '../contracts/completion.ts';
+import { CompletionInvocationError } from '../contracts/completion.ts';
 import { credentialReference } from '../contracts/credentials.ts';
 import {
   createFakeRuntimeAdapter,
@@ -410,6 +410,55 @@ describe('completion runtime', () => {
       prepared.invoke('role_player', prompt('failure'), signal),
       { message: 'gateway HTTP 400 using [REDACTED]' },
     );
+  });
+  it('validates transport observations and removes credential matches before exposing them', async () => {
+    for (const origin of ['host_transport', 'agent']) {
+      const scripted = createScriptedCompletionProvider({
+        id: MODEL.provider,
+        responses: [
+          Object.assign(new Error('HTTP failure'), {
+            code: 'http_error',
+            observation: {
+              origin,
+              http_status: 429,
+              request_id: 'secret_request',
+              provider_error_code: 'rate_limit_error',
+            },
+          }),
+        ],
+      });
+      const signal = new AbortController().signal;
+      const prepared = await prepareCompletionRuntime({
+        runId: 'safe-observation',
+        bindings: completionBindingsForPlan(
+          createTestResolvedRunPlan({
+            judgingCriteria: ['Done'],
+            judge: MODEL,
+          }),
+          composition(scripted.provider),
+        ),
+        credentialResolver: createStaticCredentialResolver(),
+        redactionSecrets: ['secret_request'],
+        signal,
+      });
+      await assert.rejects(
+        prepared.invoke('judge', prompt('judge'), signal),
+        (error) => {
+          assert.ok(error instanceof CompletionInvocationError);
+          assert.equal(
+            error.observation?.http_status,
+            origin === 'host_transport' ? 429 : undefined,
+          );
+          assert.equal(error.observation?.request_id, undefined);
+          return true;
+        },
+      );
+      assert.equal(
+        prepared.calls[0]!.http_status,
+        origin === 'host_transport' ? 429 : undefined,
+      );
+      assert.doesNotMatch(JSON.stringify(prepared.calls), /secret_request/);
+    }
   });
 });
 

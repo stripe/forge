@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { setImmediate as nextEventLoopTurn } from 'node:timers/promises';
 import { describe, it, vi } from 'vitest';
+import { CompletionInvocationError } from '../contracts/completion.ts';
 import {
   AvaRolePlayer,
   MAX_AVA_ATTEMPTS,
@@ -272,7 +273,10 @@ describe('AvaRolePlayer', () => {
       vi.useRealTimers();
     });
     const completion = scriptedCompletion(
-      new Error('temporary request failure'),
+      new CompletionInvocationError(
+        'invalid_request',
+        'temporary request failure',
+      ),
       '{invalid json',
       initialResponse(TWO_NEEDS, 'How should checkout work?'),
     );
@@ -428,9 +432,9 @@ describe('AvaRolePlayer', () => {
       {
         status: 'role_player_error',
         errorType: 'request_error',
-        attempts: MAX_AVA_ATTEMPTS,
+        attempts: 4,
         message: undefined,
-        explanation: `Ava request failed after ${MAX_AVA_ATTEMPTS} attempts.`,
+        explanation: `Ava request failed after ${4} attempts.`,
       },
     );
     assert.doesNotMatch(JSON.stringify(failedTurn), /secret-key/);
@@ -439,7 +443,7 @@ describe('AvaRolePlayer', () => {
       failedTurn.error!.message!,
       /^provider unavailable: \[REDACTED\] x+…$/,
     );
-    assert.equal(failed.calls.length, MAX_AVA_ATTEMPTS);
+    assert.equal(failed.calls.length, 4);
   });
 
   it('keeps malformed JSON and schema diagnostics free of response values and unknown keys', async () => {

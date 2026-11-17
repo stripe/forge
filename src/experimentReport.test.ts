@@ -201,6 +201,45 @@ describe('experiment run scorecards', () => {
     assert.throws(() => parseExperimentRunReport(invalid));
   });
 
+  it('sums rate-limit time from available runs and accepts older reports without it', () => {
+    const legacy = build([row(0)]);
+    assert.equal(
+      parseExperimentRunReport(legacy).summary.rate_limit_wait_ms,
+      undefined,
+    );
+    const runs = [row(0), row(1)];
+    runs[0]!.rate_limit_wait_ms = 60000;
+    runs[1]!.rate_limit_wait_ms = 23000;
+    const report = build(runs);
+    assert.equal(report.summary.rate_limit_wait_ms, 83000);
+    assert.equal(report.summary.rate_limit_wait_runs, 2);
+    // A run without a measured wait stays visible as missing coverage rather
+    // than as a zero.
+    const partial = build([...runs, row(2)]);
+    assert.equal(partial.summary.rate_limit_wait_ms, 83000);
+    assert.equal(partial.summary.rate_limit_wait_runs, 2);
+    assert.equal(partial.summary.selections, 3);
+    assert.throws(() =>
+      parseExperimentRunReport({
+        ...partial,
+        summary: { ...partial.summary, rate_limit_wait_runs: 3 },
+      }),
+    );
+    assert.equal(
+      report.cases.reduce(
+        (total, group) => total + (group.rate_limit_wait_ms ?? 0),
+        0,
+      ),
+      83000,
+    );
+    assert.throws(() =>
+      parseExperimentRunReport({
+        ...report,
+        summary: { ...report.summary, rate_limit_wait_ms: 1 },
+      }),
+    );
+  });
+
   it('keeps Codex hook policies in report coordinates and separates their score groups', () => {
     const runs = [row(0), row(1)];
     runs[0]!.selection.agent = {
@@ -1407,6 +1446,8 @@ describe('experiment run scorecards', () => {
     fixture.options.plans = Array.from({ length: 4 }, (_, repetition) => {
       const repeated = structuredClone(plan);
       repeated.selection.repetition = repetition;
+      // The unwaited fallback schedule needs more than the default test budget.
+      repeated.limits.run_timeout_ms = 30 * 60 * 1000;
       return defaultForgeEngine.parseResolvedRunPlan(repeated);
     });
     const requirements = {
@@ -1429,7 +1470,7 @@ describe('experiment run scorecards', () => {
       const provider = createScriptedCompletionProvider({
         id: 'scripted',
         requirements,
-        responses: Array.from({ length: 9 }, () => (request) => {
+        responses: Array.from({ length: 12 }, () => (request) => {
           if (repetition === 2)
             throw new Error('Service unavailable for scripted-token');
           if (
@@ -1510,7 +1551,7 @@ describe('experiment run scorecards', () => {
     assert.equal(stored.result.evaluation.status, 'judge_error');
     assert.deepEqual(stored.result.evaluation.judging_criteria[0]!.error, {
       type: 'request_error',
-      attempts: 3,
+      attempts: 4,
       message: 'Service unavailable for [REDACTED]',
     });
     const malformed = await defaultForgeEngine.verifyCompletedRun(
@@ -1522,7 +1563,7 @@ describe('experiment run scorecards', () => {
       message:
         'Judge response did not match the required schema at response.results (invalid_type).',
     });
-    assert.equal(stored.result.completion_calls.length, 9);
+    assert.equal(stored.result.completion_calls.length, 12);
     assert.ok(
       stored.result.completion_calls.every((call) => call.status === 'failed'),
     );

@@ -467,7 +467,7 @@ describe('shared experiment command', () => {
       loadExperiment: async (context) => {
         const provider = createScriptedCompletionProvider({
           id: 'scripted',
-          responses: Array.from({ length: 3 }, () => new Error('unavailable')),
+          responses: Array.from({ length: 4 }, () => new Error('unavailable')),
         }).provider;
         return {
           plans: [plan],
