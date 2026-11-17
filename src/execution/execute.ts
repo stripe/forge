@@ -838,6 +838,10 @@ async function executeInteraction(
         toolCalls: Object.freeze(toolCalls),
       }),
     ]);
+    if (session.finalize !== undefined) {
+      await session.finalize(signal);
+      signal.throwIfAborted();
+    }
     return Object.freeze({
       turns,
       stopReason: 'task_complete',
@@ -884,6 +888,10 @@ async function executeInteraction(
     conversation.failure === null
       ? null
       : rolePlayerErrorRecord(conversation.failure);
+  if (session.finalize !== undefined) {
+    await session.finalize(signal);
+    signal.throwIfAborted();
+  }
   return Object.freeze({
     turns: conversation.turns,
     stopReason: conversation.stopReason,
@@ -1521,8 +1529,10 @@ function projectReadonlyWorkspace(
 ): ReadonlyWorkspace {
   return Object.freeze({
     inspect: (relativePath: string) => workspace.inspect(relativePath),
-    readFile: (relativePath: string, options?: { maxBytes?: number }) =>
-      workspace.readFile(relativePath, options),
+    readFile: (
+      relativePath: string,
+      options?: { maxBytes?: number; signal?: AbortSignal },
+    ) => workspace.readFile(relativePath, options),
     listFiles: (options?: WorkspaceListOptions) => workspace.listFiles(options),
   });
 }

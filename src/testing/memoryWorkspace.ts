@@ -49,8 +49,9 @@ export function createMemoryWorkspace(
 
   const readFile = async (
     relativePath: string,
-    options: { maxBytes?: number } = {},
+    options: { maxBytes?: number; signal?: AbortSignal } = {},
   ): Promise<Uint8Array> => {
+    options.signal?.throwIfAborted();
     assertWorkspacePath(relativePath, false);
     const contents = files.get(relativePath);
     if (contents === undefined) {

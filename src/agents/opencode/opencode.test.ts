@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import {
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'vitest';
@@ -17,13 +27,14 @@ import type {
 } from '../../contracts/agent.ts';
 import type { CommandOptions, CommandResult } from '../../contracts/command.ts';
 import { selectAgentEvidence } from '../../evidence/selection.ts';
+import { createOwnedWorkspace } from '../../runtime/workspace.ts';
 import {
   createMemoryRunInputProvider,
   createMemoryWorkspace,
   createTestResolvedRunPlan,
 } from '../../testing/index.ts';
 import { createOpenCodeAdapter, OPENCODE_STATE_ID } from './index.ts';
-import { OPENCODE_LAUNCHER } from './launcher.ts';
+import { OPENCODE_EXPORT_LAUNCHER, OPENCODE_LAUNCHER } from './launcher.ts';
 import { MAX_NATIVE_BYTES } from './native.ts';
 import {
   PLUGIN_CONFIG_PATH,
@@ -46,6 +57,7 @@ async function fixture(
   command?: (
     argv: readonly string[],
     options: CommandOptions,
+    state: ReturnType<typeof createMemoryWorkspace>,
   ) => Promise<CommandResult>,
 ) {
   const adapter = createOpenCodeAdapter({
@@ -76,15 +88,21 @@ async function fixture(
         agent: {
           async run(argv, options = {}) {
             calls.push({ argv: [...argv], options });
-            return command
-              ? command(argv, options)
-              : result(
-                  argv[1] === 'export'
-                    ? JSON.stringify(
-                        openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
-                      )
-                    : openCodeStream({ prompt: 'Do it', response: 'Done' }),
-                );
+            if (command) return command(argv, options, state);
+            if (argv[2] === OPENCODE_EXPORT_LAUNCHER) {
+              await state.mutable.writeFile(
+                'session.json.partial',
+                Buffer.from(
+                  JSON.stringify(
+                    openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
+                  ),
+                ),
+              );
+              return result('');
+            }
+            return result(
+              openCodeStream({ prompt: 'Do it', response: 'Done' }),
+            );
           },
         },
       },
@@ -98,7 +116,7 @@ async function fixture(
         uncredentialed: {
           async run(argv, options = {}) {
             calls.push({ argv: [...argv], options });
-            return command ? command(argv, options) : result('1.19.0\n');
+            return command ? command(argv, options, state) : result('1.19.0\n');
           },
         },
       },
@@ -153,7 +171,7 @@ describe('OpenCode adapter', () => {
       credential: 'custom.key',
     });
     const requirements = adapter.requirements(selection);
-    assert.deepEqual(requirements.executables, ['opencode', 'node']);
+    assert.deepEqual(requirements.executables, ['opencode', 'node', 'sh']);
     assert.deepEqual(requirements.environment.credentials, {
       OPENCODE_API_KEY: { reference: 'custom.key' },
     });
@@ -236,22 +254,125 @@ describe('OpenCode adapter', () => {
       'run',
     ]);
     assert.equal(test.calls[0]!.argv.includes('--session'), false);
-    assert.deepEqual(test.calls[1]!.argv, [
-      'opencode',
-      'export',
-      OPEN_CODE_SESSION,
-    ]);
+    assert.equal(test.calls.length, 1);
     await session.send('-', { signal: test.context.signal });
     assert.deepEqual(
-      test.calls[2]!.argv.slice(0, 6),
+      test.calls[1]!.argv.slice(0, 6),
       test.calls[0]!.argv.slice(0, 6),
     );
-    assert.deepEqual(test.calls[2]!.argv.slice(-2), [
+    assert.deepEqual(test.calls[1]!.argv.slice(-2), [
       '--session',
       OPEN_CODE_SESSION,
     ]);
+    assert.equal(test.calls.length, 2);
+    await session.finalize!(test.context.signal);
+    assert.deepEqual(test.calls[2]!.argv, [
+      'node',
+      '-e',
+      OPENCODE_EXPORT_LAUNCHER,
+      '/home/forge/.opencode-forge/session.json',
+      String(MAX_NATIVE_BYTES),
+      'opencode',
+      OPEN_CODE_SESSION,
+    ]);
+    assert.equal(test.calls[2]!.options.signal, test.context.signal);
+    assert.equal(test.calls[2]!.options.timeoutMs, 30_000);
+    assert.equal(test.calls[2]!.options.maxOutputBytes, 64 * 1024);
+    assert.ok((await test.state.readonly.readFile('session.json')).length > 0);
     assert.equal(session.sessionId(), OPEN_CODE_SESSION);
     assert.equal(test.calls[0]!.options.signal, test.context.signal);
+  });
+  it('removes the partial after publishing the exact native bytes', async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), 'forge-opencode-publish-'),
+    );
+    try {
+      const state = await createOwnedWorkspace(directory);
+      const native = JSON.stringify(
+        openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
+      );
+      const executable = path.join(directory, 'opencode');
+      await writeFile(
+        executable,
+        `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(native)});\n`,
+        { mode: 0o700 },
+      );
+      const test = await fixture();
+      const adapter = createOpenCodeAdapter({
+        baseUrl: 'https://gateway.example/v1',
+        executable,
+        layout: { ...test.context.runtime.paths, stateDirectory: directory },
+      });
+      const session = await adapter.openSession({
+        ...test.context,
+        runtime: {
+          ...test.context.runtime,
+          stateDirectories: new Map([[OPENCODE_STATE_ID, state]]),
+          commands: {
+            agent: {
+              async run(argv) {
+                if (argv[2] === OPENCODE_LAUNCHER)
+                  return result(
+                    openCodeStream({ prompt: 'Do it', response: 'Done' }),
+                  );
+                if (argv[2] !== OPENCODE_EXPORT_LAUNCHER)
+                  assert.equal(
+                    Buffer.from(
+                      await state.readFile('session.json'),
+                    ).toString(),
+                    native,
+                  );
+                const launched = spawnSync(process.execPath, argv.slice(1));
+                assert.equal(launched.status, 0, launched.stderr.toString());
+                return result(launched.stdout.toString(), launched.status ?? 1);
+              },
+            },
+          },
+        },
+      });
+      await session.send('Do it', { signal: test.context.signal });
+      await session.finalize!(test.context.signal);
+      assert.equal(
+        Buffer.from(await state.readFile('session.json')).toString(),
+        native,
+      );
+      assert.equal(
+        (await stat(path.join(directory, 'session.json'))).mode & 0o777,
+        0o600,
+      );
+      assert.equal(
+        (await state.inspect('session.json.partial')).kind,
+        'absent',
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it('preserves published native evidence when partial cleanup fails', async () => {
+    const native = JSON.stringify(
+      openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
+    );
+    const test = await fixture(async (argv, _options, state) => {
+      if (argv[2] === OPENCODE_LAUNCHER)
+        return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
+      if (argv[2] === OPENCODE_EXPORT_LAUNCHER) {
+        await state.mutable.writeFile(
+          'session.json.partial',
+          Buffer.from(native),
+        );
+        return result('');
+      }
+      throw new Error('cleanup failed');
+    });
+    const session = await test.adapter.openSession(test.context);
+    await session.send('Do it', { signal: test.context.signal });
+    await session.finalize!(test.context.signal);
+    assert.equal(
+      Buffer.from(
+        await test.state.readonly.readFile('session.json'),
+      ).toString(),
+      native,
+    );
   });
   it('passes a declared prompt file unchanged through real Node stdin', async () => {
     const directory = await mkdtemp(
@@ -347,56 +468,211 @@ describe('OpenCode adapter', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
-  it('invalidates stale exports and preserves a completed turn when export fails', async () => {
-    let exports = 0;
-    const test = await fixture(async (argv) => {
-      if (argv[1] !== 'export')
-        return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
-      exports++;
-      if (exports === 2) throw new Error('capture failed');
-      return result(
-        JSON.stringify(openCodeExport([{ prompt: 'Do it', response: 'Done' }])),
+  it('writes native bytes through a regular file descriptor without stdout capture', async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), 'forge-opencode-export-'),
+    );
+    try {
+      const destination = path.join(directory, 'session.json');
+      const payload = JSON.stringify({
+        info: { id: OPEN_CODE_SESSION },
+        text: '世界'.repeat(100_000),
+      });
+      const source = path.join(directory, 'native.json');
+      const executable = path.join(directory, 'opencode');
+      await writeFile(source, payload);
+      await writeFile(
+        executable,
+        `#!${process.execPath}\nrequire('node:fs').createReadStream(${JSON.stringify(source)}).pipe(process.stdout);\n`,
+        { mode: 0o700 },
       );
+      await writeFile(destination, 'old bytes', { mode: 0o644 });
+      const launched = spawnSync(
+        process.execPath,
+        [
+          '-e',
+          OPENCODE_EXPORT_LAUNCHER,
+          destination,
+          String(MAX_NATIVE_BYTES),
+          executable,
+          OPEN_CODE_SESSION,
+        ],
+        { maxBuffer: 64 * 1024 },
+      );
+      assert.equal(launched.status, 0);
+      assert.equal(launched.stdout.length, 0);
+      assert.equal(await readFile(destination, 'utf8'), 'old bytes');
+      assert.equal(await readFile(`${destination}.partial`, 'utf8'), payload);
+      assert.equal((await stat(`${destination}.partial`)).mode & 0o777, 0o600);
+      await rm(`${destination}.partial`);
+      await rm(destination);
+      for (const createLink of [symlink, link]) {
+        await createLink(source, `${destination}.partial`);
+        const unsafe = spawnSync(process.execPath, [
+          '-e',
+          OPENCODE_EXPORT_LAUNCHER,
+          destination,
+          String(MAX_NATIVE_BYTES),
+          executable,
+          OPEN_CODE_SESSION,
+        ]);
+        assert.notEqual(unsafe.status, 0);
+        assert.equal(await readFile(source, 'utf8'), payload);
+        await rm(`${destination}.partial`);
+      }
+      await writeFile(destination, '');
+      for (const failure of ['non-zero', 'oversized']) {
+        if (failure === 'non-zero')
+          await writeFile(
+            executable,
+            `#!${process.execPath}\nprocess.stdout.write('{}'); process.exitCode = 1;\n`,
+            { mode: 0o700 },
+          );
+        else
+          await writeFile(
+            executable,
+            `#!${process.execPath}\nrequire('node:fs').createReadStream(${JSON.stringify(source)}).pipe(process.stdout);\n`,
+            { mode: 0o700 },
+          );
+        const rejected = spawnSync(process.execPath, [
+          '-e',
+          OPENCODE_EXPORT_LAUNCHER,
+          destination,
+          String(failure === 'oversized' ? 1024 : MAX_NATIVE_BYTES),
+          executable,
+          OPEN_CODE_SESSION,
+        ]);
+        assert.equal(rejected.status, 1);
+        assert.equal((await readFile(destination)).length, 0);
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it('bounds the file while the exporter is still running', async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), 'forge-opencode-bound-'),
+    );
+    try {
+      const executable = path.join(directory, 'opencode');
+      const destination = path.join(directory, 'session.json');
+      await writeFile(
+        executable,
+        [
+          `#!${process.execPath}`,
+          "require('node:fs').writeSync(1, Buffer.alloc(64 * 1024));",
+          "process.stderr.write('ready');",
+          'setTimeout(() => {}, 300);',
+        ].join('\n'),
+        { mode: 0o700 },
+      );
+      const child = spawn(process.execPath, [
+        '-e',
+        OPENCODE_EXPORT_LAUNCHER,
+        destination,
+        '1024',
+        executable,
+        OPEN_CODE_SESSION,
+      ]);
+      const closed = once(child, 'close');
+      await once(child.stderr, 'data');
+      const size = (await stat(`${destination}.partial`)).size;
+      // Shells use 512- or 1024-byte blocks. Neither can exceed this ceiling.
+      assert.ok(size <= 2048, `capture reached ${size} bytes`);
+      assert.equal(child.exitCode, null);
+      await closed;
+      await assert.rejects(stat(destination), { code: 'ENOENT' });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it('keeps a late export ineligible after a command rejection', async () => {
+    const test = await fixture(async (argv) => {
+      if (argv[2] === OPENCODE_EXPORT_LAUNCHER) throw new Error('timeout');
+      return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
     });
     const session = await test.adapter.openSession(test.context);
     await session.send('Do it', { signal: test.context.signal });
-    assert.ok((await test.state.readonly.readFile('session.json')).length > 0);
-    assert.equal(
-      (await session.send('Again', { signal: test.context.signal })).text,
-      'Done',
+    await session.finalize!(test.context.signal);
+    // Simulate an exporter completing during runtime shutdown after rejection.
+    await test.state.mutable.writeFile(
+      'session.json.partial',
+      Buffer.from(
+        JSON.stringify(openCodeExport([{ prompt: 'Do it', response: 'Done' }])),
+      ),
     );
     assert.equal(
       (await test.state.readonly.readFile('session.json')).length,
       0,
     );
+    const evidenceContext = {
+      ...test.context,
+      sessionId: OPEN_CODE_SESSION,
+      runtime: {
+        runtimeId: test.context.runtime.runtimeId,
+        paths: test.context.runtime.paths,
+        workspace: test.workspace.readonly,
+        stateDirectories: new Map([[OPENCODE_STATE_ID, test.state.readonly]]),
+        metadata: {},
+      },
+    };
+    assert.equal(
+      (await test.adapter.collectEvidence(evidenceContext)).kind,
+      'unavailable',
+    );
+    assert.equal(
+      await test.adapter.collectNativeArtifact!(evidenceContext),
+      undefined,
+    );
   });
-  for (const failure of ['non-zero exit', 'oversized export']) {
+  it('does not export a session without completed turns', async () => {
+    const test = await fixture();
+    const session = await test.adapter.openSession(test.context);
+    await session.finalize!(test.context.signal);
+    assert.equal(test.calls.length, 0);
+  });
+  for (const failure of [
+    'command rejection',
+    'non-zero exit',
+    'oversized export',
+  ]) {
     it(`uses explicit driver fallback after an export with ${failure}`, async () => {
       let exports = 0;
       const native = JSON.stringify(
         openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
       );
-      const test = await fixture(async (argv) => {
-        if (argv[1] !== 'export')
+      const test = await fixture(async (argv, _options, state) => {
+        if (argv[2] !== OPENCODE_EXPORT_LAUNCHER)
           return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
         exports++;
-        if (exports === 1) return result(native);
-        // Valid JSON in both cases: only the status/byte limit rejects it.
-        return failure === 'non-zero exit'
-          ? result(native, 1)
-          : result(native.padEnd(MAX_NATIVE_BYTES + 1));
+        // Valid JSON: only the command failure or byte limit rejects it.
+        await state.mutable.writeFile(
+          'session.json.partial',
+          Buffer.from(
+            failure === 'oversized export'
+              ? native.padEnd(MAX_NATIVE_BYTES + 1)
+              : native,
+          ),
+        );
+        if (failure === 'command rejection') throw new Error('capture failed');
+        return result('', failure === 'non-zero exit' ? 1 : 0);
       });
+      await test.state.mutable.writeFile('session.json', Buffer.from(native));
       const session = await test.adapter.openSession(test.context);
       const first = await session.send('Do it', {
         signal: test.context.signal,
       });
-      assert.ok(
-        (await test.state.readonly.readFile('session.json')).length > 0,
+      assert.equal(
+        (await test.state.readonly.readFile('session.json')).length,
+        0,
       );
       const second = await session.send('Again', {
         signal: test.context.signal,
       });
       assert.equal(second.text, 'Done');
+      assert.equal(exports, 0);
+      await session.finalize!(test.context.signal);
+      assert.equal(exports, 1);
       assert.equal(session.sessionId(), OPEN_CODE_SESSION);
       assert.equal(
         (await test.state.readonly.readFile('session.json')).length,
@@ -443,22 +719,69 @@ describe('OpenCode adapter', () => {
       );
     });
   }
-  it('propagates cancellation during execution or export', async () => {
+  it('propagates cancellation during execution or final export', async () => {
     for (const phase of ['run', 'export']) {
       const controller = new AbortController();
       const test = await fixture(async (argv) => {
-        if ((argv[1] === 'export') === (phase === 'export')) {
+        if ((argv[2] === OPENCODE_EXPORT_LAUNCHER) === (phase === 'export')) {
           controller.abort(new Error('cancelled'));
           throw controller.signal.reason;
         }
         return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
       });
       const session = await test.adapter.openSession(test.context);
-      await assert.rejects(
-        session.send('Do it', { signal: controller.signal }),
-        /cancelled/,
-      );
+      if (phase === 'run') {
+        await assert.rejects(
+          session.send('Do it', { signal: controller.signal }),
+          /cancelled/,
+        );
+      } else {
+        await session.send('Do it', { signal: controller.signal });
+        await assert.rejects(session.finalize!(controller.signal), /cancelled/);
+        assert.equal(
+          (await test.state.readonly.readFile('session.json')).length,
+          0,
+        );
+      }
     }
+  });
+  it('passes cancellation through the capture read and invalidates rejected bytes', async () => {
+    const controller = new AbortController();
+    const reason = new Error('cancel capture read');
+    const test = await fixture();
+    let readCapture = false;
+    const state = {
+      ...test.state.mutable,
+      async readFile(
+        relativePath: string,
+        options?: { maxBytes?: number; signal?: AbortSignal },
+      ) {
+        if (relativePath === 'session.json.partial') {
+          readCapture = true;
+          assert.equal(options?.signal, controller.signal);
+          controller.abort(reason);
+        }
+        return test.state.mutable.readFile(relativePath, options);
+      },
+    };
+    const session = await test.adapter.openSession({
+      ...test.context,
+      runtime: {
+        ...test.context.runtime,
+        stateDirectories: new Map([[OPENCODE_STATE_ID, state]]),
+      },
+    });
+    await session.send('Do it', { signal: controller.signal });
+
+    await assert.rejects(
+      session.finalize!(controller.signal),
+      (error) => error === reason,
+    );
+    assert.equal(readCapture, true);
+    assert.equal(
+      (await test.state.readonly.readFile('session.json')).length,
+      0,
+    );
   });
   it('requires a model profile during pure capability preflight', () => {
     const { model_profile: _, ...missing } = selection;

@@ -7,6 +7,7 @@ import {
   createOpenCodeAdapter,
   OPENCODE_STATE_ID,
 } from '../src/agents/opencode/index.ts';
+import { OPENCODE_EXPORT_LAUNCHER } from '../src/agents/opencode/launcher.ts';
 import { parseAtifTrajectory } from '../src/atif/index.ts';
 import { EMPTY_JUDGE_TRANSCRIPT } from '../src/evaluation/judgeTranscript.ts';
 import { renderRecordedJudgeWorkspaceEvidence } from '../src/evaluation/judgeWorkspace.ts';
@@ -156,10 +157,13 @@ describe('OpenCode whole-prompt judge budget integration', () => {
           const stdout =
             call.scope === 'uncredentialed'
               ? '1.19.0'
-              : call.argv[1] === 'export'
-                ? raw
+              : call.argv[2] === OPENCODE_EXPORT_LAUNCHER
+                ? ''
                 : stream;
-          if (call.scope === 'agent' && call.argv[1] !== 'export') {
+          if (
+            call.scope === 'agent' &&
+            call.argv[2] !== OPENCODE_EXPORT_LAUNCHER
+          ) {
             const state =
               runtime.runs[0]!.stateDirectories.get(
                 OPENCODE_STATE_ID,
@@ -169,11 +173,17 @@ describe('OpenCode whole-prompt judge budget integration', () => {
               TASK,
             );
           }
+          if (call.argv[2] === OPENCODE_EXPORT_LAUNCHER) {
+            await runtime.runs[0]!.stateDirectories.get(
+              OPENCODE_STATE_ID,
+            )!.mutable.writeFile('session.json.partial', Buffer.from(raw));
+          }
           return {
             stdout,
             stderr: '',
             exitCode:
-              call.argv[1] === 'export' && scenario.capture === 'failed'
+              call.argv[2] === OPENCODE_EXPORT_LAUNCHER &&
+              scenario.capture === 'failed'
                 ? 1
                 : 0,
             durationMs: 1,

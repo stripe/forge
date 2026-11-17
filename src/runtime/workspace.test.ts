@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import fsPromises, * as fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, it } from 'vitest';
+import { afterEach, describe, it, vi } from 'vitest';
 import { createOwnedWorkspace } from './workspace.ts';
 
 const roots: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  syncBuiltinESMExports();
   await Promise.all(
     roots
       .splice(0)
@@ -15,7 +19,213 @@ afterEach(async () => {
   );
 });
 
+async function captureFixture() {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'forge-workspace-capture-'),
+  );
+  roots.push(root);
+  const workspace = await createOwnedWorkspace(root);
+  await workspace.writeFile('session.json.partial', Buffer.from('safe'));
+  return {
+    root: await fs.realpath(root),
+    capture: path.join(root, 'session.json.partial'),
+    workspace,
+  };
+}
+
+async function fileHandlePrototype(file: string) {
+  const handle = await fs.open(file, 'r');
+  const prototype = Object.getPrototypeOf(handle) as typeof handle;
+  await handle.close();
+  return prototype;
+}
+
 describe('owned workspace', () => {
+  it('rejects replacement of the capture with a symlink after checking its parent', async () => {
+    const test = await captureFixture();
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'forge-workspace-outside-'),
+    );
+    roots.push(outside);
+    const target = path.join(outside, 'sentinel');
+    await fs.writeFile(target, 'outside');
+    const realpath = fsPromises.realpath;
+    const check = vi
+      .spyOn(fsPromises, 'realpath')
+      .mockImplementationOnce(async () => {
+        const parent = await realpath(test.root);
+        await fs.unlink(test.capture);
+        await fs.symlink(target, test.capture);
+        return parent;
+      });
+    syncBuiltinESMExports();
+
+    await assert.rejects(
+      test.workspace.readFile('session.json.partial'),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.equal(
+          error.message,
+          'Workspace reads do not follow symlinks: session.json.partial',
+        );
+        assert.equal(error.message.includes(test.root), false);
+        return true;
+      },
+    );
+    assert.equal(check.mock.calls.length, 1);
+    assert.equal(await fs.readFile(target, 'utf8'), 'outside');
+  });
+
+  it('keeps special-file open errors relative to the workspace', async () => {
+    const test = await captureFixture();
+    const open = vi.spyOn(fsPromises, 'open');
+    syncBuiltinESMExports();
+    for (const code of ['ENXIO', 'ENODEV', 'EISDIR']) {
+      open.mockRejectedValueOnce(
+        Object.assign(new Error(`${code}: open '${test.capture}'`), { code }),
+      );
+      await assert.rejects(test.workspace.readFile('session.json.partial'), {
+        message: 'Workspace path is not a file: session.json.partial',
+      });
+    }
+  });
+
+  it('keeps other open-time failures relative to the workspace', async () => {
+    const test = await captureFixture();
+    const open = vi.spyOn(fsPromises, 'open');
+    syncBuiltinESMExports();
+    for (const code of ['ENOENT', 'EACCES']) {
+      open.mockRejectedValueOnce(
+        Object.assign(new Error(`${code}: open '${test.capture}'`), { code }),
+      );
+      await assert.rejects(test.workspace.readFile('session.json.partial'), {
+        message: 'Workspace file could not be opened: session.json.partial',
+      });
+    }
+  });
+
+  it('rejects replacement of the capture with a FIFO without waiting for a writer', {
+    skip: process.platform === 'win32',
+    timeout: 1000,
+  }, async () => {
+    const test = await captureFixture();
+    const realpath = fsPromises.realpath;
+    const check = vi
+      .spyOn(fsPromises, 'realpath')
+      .mockImplementationOnce(async () => {
+        const parent = await realpath(test.root);
+        await fs.unlink(test.capture);
+        const created = spawnSync('mkfifo', [test.capture], { timeout: 500 });
+        assert.equal(created.status, 0, created.stderr?.toString());
+        return parent;
+      });
+    syncBuiltinESMExports();
+
+    await assert.rejects(
+      test.workspace.readFile('session.json.partial'),
+      /not a file/,
+    );
+    assert.equal(check.mock.calls.length, 1);
+  });
+
+  it('keeps reading the validated handle when its pathname is replaced after fstat', async () => {
+    const test = await captureFixture();
+    const prototype = await fileHandlePrototype(test.capture);
+    const stat = prototype.stat;
+    let opened: fs.FileHandle | undefined;
+    const checked = vi
+      .spyOn(prototype, 'stat')
+      .mockImplementationOnce(async function (
+        this: typeof prototype,
+        ...args: Parameters<typeof stat>
+      ) {
+        opened = this;
+        const result = await stat.apply(this, args);
+        await fs.unlink(test.capture);
+        await fs.symlink('missing-target', test.capture);
+        return result;
+      });
+
+    assert.equal(
+      Buffer.from(
+        await test.workspace.readFile('session.json.partial'),
+      ).toString(),
+      'safe',
+    );
+    assert.equal(checked.mock.calls.length, 1);
+    assert.equal(opened?.fd, -1);
+  });
+
+  it('caps reads at limit + 1 bytes when the capture grows after fstat', async () => {
+    const test = await captureFixture();
+    const prototype = await fileHandlePrototype(test.capture);
+    const stat = prototype.stat;
+    let opened: fs.FileHandle | undefined;
+    const checked = vi
+      .spyOn(prototype, 'stat')
+      .mockImplementationOnce(async function (
+        this: typeof prototype,
+        ...args: Parameters<typeof stat>
+      ) {
+        opened = this;
+        const result = await stat.apply(this, args);
+        await fs.appendFile(test.capture, Buffer.alloc(128 * 1024, 'a'));
+        return result;
+      });
+    const read = prototype.read;
+    let bytesRead = 0;
+    vi.spyOn(prototype, 'read').mockImplementation(async function (
+      this: typeof prototype,
+      ...args: Parameters<typeof read>
+    ) {
+      const result = await read.apply(this, args);
+      bytesRead += result.bytesRead;
+      return result;
+    });
+
+    await assert.rejects(
+      test.workspace.readFile('session.json.partial', { maxBytes: 64 * 1024 }),
+      /byte limit/,
+    );
+    assert.equal(checked.mock.calls.length, 1);
+    assert.equal(bytesRead, 64 * 1024 + 1);
+    assert.equal(opened?.fd, -1);
+  });
+
+  it('propagates cancellation during a read and closes the descriptor', async () => {
+    const test = await captureFixture();
+    const controller = new AbortController();
+    const reason = new Error('cancel capture read');
+    const prototype = await fileHandlePrototype(test.capture);
+    const read = prototype.read;
+    let opened: fs.FileHandle | undefined;
+    vi.spyOn(prototype, 'read').mockImplementationOnce(async function (
+      this: typeof prototype,
+      ...args: Parameters<typeof read>
+    ) {
+      opened = this;
+      const result = await read.apply(this, args);
+      controller.abort(reason);
+      return result;
+    });
+
+    await assert.rejects(
+      test.workspace.readFile('session.json.partial', {
+        signal: controller.signal,
+      }),
+      (error) => error === reason,
+    );
+    assert.equal(opened?.fd, -1);
+    const original = opened;
+    await assert.rejects(
+      test.workspace.readFile('session.json.partial', {
+        signal: controller.signal,
+      }),
+      (error) => error === reason,
+    );
+    assert.equal(opened, original);
+  });
+
   it('writes exact bytes and exposes bounded inspection', async () => {
     const root = await fs.mkdtemp(
       path.join(os.tmpdir(), 'forge-workspace-test-'),

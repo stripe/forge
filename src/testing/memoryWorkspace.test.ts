@@ -54,6 +54,13 @@ describe('createMemoryWorkspace', () => {
       workspace.readonly.readFile('src/b.txt', { maxBytes: 3 }),
       /byte limit/,
     );
+    const reason = new Error('cancel read');
+    await assert.rejects(
+      workspace.readonly.readFile('src/b.txt', {
+        signal: AbortSignal.abort(reason),
+      }),
+      (error) => error === reason,
+    );
     await assert.rejects(
       workspace.mutable.writeFile('src/b.txt/child', Buffer.from('x')),
       /parent is a regular file/,

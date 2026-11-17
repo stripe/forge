@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type {
@@ -11,6 +12,7 @@ import type {
 import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
 
 const DEFAULT_READ_LIMIT = 64 * 1024 * 1024;
+const READ_CHUNK_BYTES = 64 * 1024;
 const DEFAULT_ENTRY_LIMIT = 100_000;
 
 export interface OwnedWorkspaceOptions {
@@ -55,34 +57,79 @@ export async function createOwnedWorkspace(
 
   return Object.freeze({
     inspect,
-    async readFile(relativePath: string, options: { maxBytes?: number } = {}) {
+    async readFile(
+      relativePath: string,
+      options: { maxBytes?: number; signal?: AbortSignal } = {},
+    ) {
+      options.signal?.throwIfAborted();
       assertWorkspacePath(relativePath, false);
       const candidate = resolveCandidate(canonicalRoot, relativePath);
-      const stat = await fs.lstat(candidate);
-      if (stat.isSymbolicLink()) {
-        throw new Error(
-          `Workspace reads do not follow symlinks: ${relativePath}`,
-        );
-      }
-      if (!stat.isFile())
-        throw new Error(`Workspace path is not a file: ${relativePath}`);
       const limit = positiveInteger(
         options.maxBytes ?? DEFAULT_READ_LIMIT,
         'maxBytes',
       );
-      if (stat.size > limit) {
-        throw new Error(
-          `Workspace file exceeds its ${limit} byte limit: ${relativePath}`,
-        );
-      }
       await assertRealParentWithinRoot(canonicalRoot, candidate);
-      const body = await fs.readFile(candidate);
-      if (body.byteLength > limit) {
-        throw new Error(
-          `Workspace file exceeds its ${limit} byte limit: ${relativePath}`,
-        );
+      options.signal?.throwIfAborted();
+      // The runtime protects the root's host parent. Nested parents must be
+      // stable during this pathname-based containment check (e.g. quiesced).
+      // NOFOLLOW binds final-component validation to the descriptor; NONBLOCK
+      // lets us reject a FIFO without waiting for a writer during open.
+      const handle = await fs
+        .open(
+          candidate,
+          constants.O_RDONLY |
+            constants.O_NOFOLLOW |
+            constants.O_NONBLOCK |
+            (constants.O_NOCTTY ?? 0),
+        )
+        .catch((error: unknown) => {
+          // Native open errors include the absolute host path.
+          const code =
+            error instanceof Error && 'code' in error ? error.code : undefined;
+          if (code === 'ELOOP') {
+            throw new Error(
+              `Workspace reads do not follow symlinks: ${relativePath}`,
+            );
+          }
+          if (code === 'ENXIO' || code === 'ENODEV' || code === 'EISDIR') {
+            throw new Error(`Workspace path is not a file: ${relativePath}`);
+          }
+          throw new Error(
+            `Workspace file could not be opened: ${relativePath}`,
+          );
+        });
+      try {
+        options.signal?.throwIfAborted();
+        const stat = await handle.stat();
+        if (!stat.isFile())
+          throw new Error(`Workspace path is not a file: ${relativePath}`);
+        const exceeded = () =>
+          new Error(
+            `Workspace file exceeds its ${limit} byte limit: ${relativePath}`,
+          );
+        if (stat.size > limit) throw exceeded();
+        const chunks: Buffer[] = [];
+        const chunk = Buffer.allocUnsafe(Math.min(READ_CHUNK_BYTES, limit + 1));
+        let size = 0;
+        while (true) {
+          options.signal?.throwIfAborted();
+          // Read at most limit + 1 bytes, including a one-byte overflow probe.
+          // A file growing after fstat cannot cause an unbounded allocation.
+          const { bytesRead } = await handle.read(
+            chunk,
+            0,
+            Math.min(chunk.byteLength, limit - size + 1),
+            null,
+          );
+          options.signal?.throwIfAborted();
+          size += bytesRead;
+          if (size > limit) throw exceeded();
+          if (bytesRead === 0) return Buffer.concat(chunks, size);
+          chunks.push(Buffer.from(chunk.subarray(0, bytesRead)));
+        }
+      } finally {
+        await handle.close();
       }
-      return body;
     },
     async listFiles(options: WorkspaceListOptions = {}) {
       const under = options.under ?? '.';

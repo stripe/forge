@@ -22,3 +22,25 @@ closeSync(fd);
 child.on('error', () => { process.exitCode = 1; });
 child.on('exit', (code) => { process.exitCode = code ?? 1; });
 `;
+
+/** Native stdout goes to an owned regular file, outside runtime output capture. */
+export const OPENCODE_EXPORT_LAUNCHER = `
+const { openSync, closeSync, fstatSync, unlinkSync, constants } = require('node:fs');
+const { spawn } = require('node:child_process');
+const [destination, maxBytes, executable, session] = process.argv.slice(1);
+const partial = destination + '.partial';
+const fd = openSync(partial, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
+if (!fstatSync(fd).isFile()) { closeSync(fd); process.exit(1); }
+// POSIX shells count 512-byte blocks; some shells use 1024-byte blocks.
+// The process can write at most twice maxBytes; eligibility keeps the exact cap.
+const blocks = Math.floor(Number(maxBytes) / 512);
+const child = spawn('sh', ['-c', 'ulimit -f "$1" || exit 1; shift; exec "$@"',
+  'forge-opencode-export', String(blocks), executable, 'export', session],
+  { stdio: ['ignore', fd, 'inherit'] });
+child.on('error', () => { process.exitCode = 1; });
+child.on('close', (code) => {
+  const eligible = code === 0 && fstatSync(fd).size <= Number(maxBytes);
+  closeSync(fd);
+  if (!eligible) { unlinkSync(partial); process.exitCode = 1; }
+});
+`;

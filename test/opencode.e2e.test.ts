@@ -7,6 +7,7 @@ import {
   createOpenCodeAdapter,
   OPENCODE_STATE_ID,
 } from '../src/agents/opencode/index.js';
+import { OPENCODE_EXPORT_LAUNCHER } from '../src/agents/opencode/launcher.ts';
 import {
   createArtifactStore,
   executeEval,
@@ -38,6 +39,7 @@ describe('OpenCode engine integration', () => {
       );
       try {
         const turns: OpenCodeFixtureTurn[] = [];
+        let exports = 0;
         const agent = createOpenCodeAdapter({
           baseUrl: 'https://gateway.example/v1',
         });
@@ -57,10 +59,19 @@ describe('OpenCode engine integration', () => {
             assert.deepEqual(call.credentialEnvironmentNames, [
               'OPENCODE_API_KEY',
             ]);
-            if (call.argv[1] === 'export') {
-              assert.equal(call.argv[2], OPEN_CODE_SESSION);
+            if (call.argv[2] === OPENCODE_EXPORT_LAUNCHER) {
+              exports++;
+              assert.equal(turns.length, mode === 'multi_turn' ? 2 : 1);
+              assert.equal(runtime.runs[0]!.events.includes('quiesce'), false);
+              assert.equal(call.argv[6], OPEN_CODE_SESSION);
+              await runtime.runs[0]!.stateDirectories.get(
+                OPENCODE_STATE_ID,
+              )!.mutable.writeFile(
+                'session.json.partial',
+                Buffer.from(JSON.stringify(openCodeExport(turns))),
+              );
               return {
-                stdout: JSON.stringify(openCodeExport(turns)),
+                stdout: '',
                 stderr: '',
                 exitCode: 0,
                 durationMs: 1,
@@ -164,6 +175,7 @@ describe('OpenCode engine integration', () => {
           OPEN_CODE_MODEL_PROFILE,
         );
         assert.equal(turns.length, mode === 'multi_turn' ? 2 : 1);
+        assert.equal(exports, 1);
         assert.deepEqual(resolved, ['opencode.api-key']);
         const native = verified.result.supplemental_artifacts.find(
           (item) => item.path === 'native/opencode/session.json',
