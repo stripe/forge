@@ -79,7 +79,10 @@ import {
   runConversation,
 } from '../interaction/index.ts';
 import {
+  boundToolResult,
   interactionToolResult,
+  MAX_RUN_TOOL_RESULT_CODE_UNITS,
+  MAX_TOOL_RESULT_CODE_UNITS,
 } from '../interaction/toolResult.ts';
 import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
 import { sha256Digest } from '../model/hashes.ts';
@@ -794,6 +797,7 @@ async function executeInteraction(
 ): Promise<ExecutedInteraction> {
   let lastTurnSessionId: string | undefined;
   let toolResultRedactions = 0;
+  const resultBudget = { remaining: MAX_RUN_TOOL_RESULT_CODE_UNITS };
   const trackedSession: AgentSession = Object.freeze({
     sessionId: () => session.sessionId(),
     async send(
@@ -814,6 +818,7 @@ async function executeInteraction(
       const snapshot = snapshotAgentTurn(
         await session.send(message, options),
         secrets,
+        resultBudget,
       );
       const turn = snapshot.turn;
       toolResultRedactions += snapshot.toolResultRedactions;
@@ -915,6 +920,7 @@ async function executeInteraction(
 function snapshotAgentTurn(
   turn: AgentTurn,
   secrets: readonly string[],
+  resultBudget: { remaining: number },
 ): { turn: AgentTurn; toolResultRedactions: number } {
   if (
     !turn ||
@@ -941,11 +947,21 @@ function snapshotAgentTurn(
   let toolResultRedactions = 0;
   const toolCalls = turn.toolCalls.map((call) => {
     if (call.result === undefined) return call;
-    const { content } = call.result;
-    if (content === undefined) return call;
+    // Only Forge decides `truncated`, so adapter-supplied values are dropped.
+    const { content, isError, omission } = call.result;
+    const observed = {
+      ...(isError === undefined ? {} : { isError }),
+      ...(omission === undefined ? {} : { omission }),
+    };
+    if (content === undefined) return { ...call, result: observed };
     const redacted = redactSecrets(content, secrets);
     toolResultRedactions += redacted.replacements;
-    return { ...call, result: { ...call.result, content: redacted.value } };
+    const result = boundToolResult(
+      { ...observed, content: redacted.value },
+      Math.min(MAX_TOOL_RESULT_CODE_UNITS, resultBudget.remaining),
+    );
+    resultBudget.remaining -= result.content?.length ?? 0;
+    return { ...call, result };
   });
   return {
     turn: Object.freeze({

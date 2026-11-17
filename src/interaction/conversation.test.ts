@@ -23,7 +23,7 @@ it('snapshots tool results so later adapter mutation cannot rewrite evidence', (
   assert.ok(Object.isFrozen(calls[0]?.result));
 });
 
-it('bounds snapshotted results without splitting an emoji, and only Forge sets truncated', () => {
+it('bounds snapshotted results without splitting an emoji', () => {
   const prefixLength = 1_048_576;
   const original = 'x'.repeat(prefixLength - 1) + '😀' + 'x'.repeat(100);
   const [call] = snapshotAgentToolCalls([
@@ -40,12 +40,6 @@ it('bounds snapshotted results without splitting an emoji, and only Forge sets t
     snapshotAgentToolCalls([{ name: 'Read', result: { content: exact } }])[0]!
       .result,
     { content: exact },
-  );
-  assert.deepEqual(
-    snapshotAgentToolCalls([
-      { name: 'Read', result: { content: 'short', truncated: true } },
-    ])[0]!.result,
-    { content: 'short' },
   );
 });
 

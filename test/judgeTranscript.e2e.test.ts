@@ -400,3 +400,69 @@ it('redacts a credential that JSON serialization escaped inside result text', as
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+it('caps the result text retained across one run and marks the cut results', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-result-total-'));
+  try {
+    const agent = createScriptedAgentAdapter({
+      turns: [
+        {
+          text: 'Done.',
+          sessionId: 'selected',
+          toolCalls: [
+            // Adapters cannot claim Forge's cut.
+            {
+              id: 'small',
+              name: 'Read',
+              result: { content: 'ok', truncated: true },
+            },
+            ...Array.from({ length: 17 }, (_, index) => ({
+              id: `call-${index}`,
+              name: 'Read',
+              result: { content: 'x'.repeat(MAX_TOOL_RESULT_CODE_UNITS) },
+            })),
+          ],
+        },
+      ],
+    });
+    const completed = await executeEval({
+      runId: 'result-total',
+      plan: createTestResolvedRunPlan(),
+      composition: {
+        runtime: createFakeRuntimeAdapter().adapter,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+        credentialResolver: createStaticCredentialResolver({}),
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: createArtifactStore({ root }),
+      },
+    });
+    await verifyCompletedRun(completed.location);
+    const audit = JSON.parse(
+      await fs.readFile(
+        path.join(completed.location, 'interaction.json'),
+        'utf8',
+      ),
+    );
+    const results = audit.turns[0].tool_calls.map(
+      (call: { result: { content: string; truncated?: boolean } }) =>
+        call.result,
+    );
+    const total = results.reduce(
+      (sum: number, { content }: { content: string }) => sum + content.length,
+      0,
+    );
+    assert.equal(total, 16 * 1024 * 1024);
+    assert.equal(
+      results.filter(({ truncated }: { truncated?: boolean }) => truncated)
+        .length,
+      2,
+    );
+    assert.deepEqual(results[0], { content: 'ok' });
+    assert.equal(results[15].truncated, undefined);
+    assert.equal(results[16].content.length, MAX_TOOL_RESULT_CODE_UNITS - 2);
+    assert.equal(results[17].content, '');
+    assert.equal(results[17].truncated, true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}, 60_000);

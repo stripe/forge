@@ -630,7 +630,9 @@ limited to 1,048,576 UTF-16 code units; absent when nothing was observed),
 `omission` (`non_text_content`, `not_completed`, or `output_unavailable`).
 Adapters never write Forge prose into `content`. Forge redacts result text
 before this boundary's limit is applied; oversized text keeps an unmarked prefix
-and Forge sets `truncated: true` (adapter-supplied values are ignored). The interaction
+and Forge sets `truncated: true` (adapter-supplied values are ignored). Across
+one run the ledger retains at most 16,777,216 code units of result text; later
+results keep what remains, possibly nothing, and are marked `truncated`. The interaction
 audit retains the result as `content`, `is_error`, `omission`, and `truncated`;
 turns without results omit it. Judge-visible markers are rendered once, by
 driver fallback.
