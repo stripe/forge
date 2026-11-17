@@ -228,9 +228,9 @@ export interface JudgeEvidenceV1 {
     /** False when any warning or bound leaves evidence incomplete. */
     readonly complete: boolean;
     /**
-     * Any collection or rendering bound was hit, including per-file text limits.
-     * Omissions or read failures alone set complete false without setting this true.
-     * Older artifacts may omit this field; absence does not mean false.
+     * True when any collection or rendering bound was hit, including per-file text limits; omitted otherwise, so
+     * untruncated evidence is byte-for-byte unchanged. Omissions or read failures alone set complete false without
+     * setting this. Artifacts written before this field never record it; their truncation shows only in warnings.
      */
     readonly truncated?: boolean;
     readonly warnings: readonly {

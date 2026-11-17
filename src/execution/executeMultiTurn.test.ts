@@ -150,9 +150,9 @@ describe('executeEval multi-turn and judging integration', () => {
     const evidence = artifactJson(
       artifacts.runs.get('excluded-dependencies')!,
       'judge-evidence.json',
-    ) as { workspace: { complete: boolean; truncated: boolean } };
+    ) as { workspace: { complete: boolean; truncated?: boolean } };
     assert.equal(evidence.workspace.complete, true);
-    assert.equal(evidence.workspace.truncated, false);
+    assert.equal('truncated' in evidence.workspace, false);
   });
 
   it('saves partial workspace text and its limit warning for verified regrade', async (t) => {
