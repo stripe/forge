@@ -9,6 +9,7 @@ import {
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
 } from '../evaluation/judgeTranscript.ts';
+import type { InteractionToolResultV1 } from '../index.ts';
 import { FORGE_VERSION } from '../version.ts';
 import {
   parseEvaluationResult,
@@ -22,6 +23,21 @@ const DIGEST = `sha256:${'a'.repeat(64)}`;
 const CONTEXT = { forgeVersion: FORGE_VERSION };
 
 describe('canonical interaction and judge evidence parsing', () => {
+  it('exports the persisted tool-result type from the package root', () => {
+    const result: InteractionToolResultV1 = {
+      content: 'text',
+      is_error: false,
+      omission: 'non_text_content',
+      truncated: true,
+    };
+    assert.deepEqual(Object.keys(result), [
+      'content',
+      'is_error',
+      'omission',
+      'truncated',
+    ]);
+  });
+
   it('accepts optional bounded driver results and rejects malformed or extended result objects', () => {
     const artifact = {
       mode: 'one_shot',

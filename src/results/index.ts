@@ -32,6 +32,7 @@ export {
   type ForgeArtifactParseContext,
   type InteractionArtifactV1,
   type InteractionToolCallV1,
+  type InteractionToolResultV1,
   type InteractionTurnV1,
   type JudgeEvidenceV1,
   type JudgeWorkspaceEntryV1,
