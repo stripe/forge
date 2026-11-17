@@ -1018,10 +1018,10 @@ including the final allowed turn. The loop stops with:
 - `max_turns` after the final response has been assessed; or
 - `role_player_error` after structured-output/request retry exhaustion.
 
-Each Ava decision has at most three attempts with fixed one- and five-second
-retry waits. Exhaustion is a recordable interaction outcome, not a fatal run
-error. If it happens before the first agent turn, Forge emits a system-only
-fallback trajectory and records a null agent session identity.
+Each Ava decision uses the shared [host completion retry policy](#host-side-completion-providers).
+Exhaustion is a recordable interaction outcome, not a fatal run error. If it
+happens before the first agent turn, Forge emits a system-only fallback
+trajectory and records a null agent session identity.
 
 Exhausted decisions record a final `message` alongside the error type, attempt
 count, and summary explanation in `interaction.json` and `result.json`.
@@ -1073,6 +1073,77 @@ configuration; neither enters plans or results. See the README's
 The Anthropic provider supports Claude Haiku, Sonnet, and Opus 4.5 or newer.
 Its pure requirements validation explicitly rejects Claude Fable as a judge
 or Ava model before credentials or requests; coding-agent selection is separate.
+
+Ava and criterion judging share one retry policy per logical request:
+
+- HTTP 429, and HTTP 503 with a valid `Retry-After`, have six retry waits.
+  Their base delays are 2, 4, 8, 16, 32, and 64 seconds. Jitter scales each
+  delay to 75–100% of its base. `Retry-After` seconds or an HTTP date can
+  increase that single delay, capped at 64 seconds. Zero, past, or smaller
+  hints never shorten the scheduled backoff.
+- A recognized `insufficient_quota` error is permanent and ends the request
+  without another call or wait, including when HTTP 429 carries `Retry-After`.
+- HTTP 400, 401, 403, 404, recognized invalid-request/authentication errors,
+  and malformed structured output use the short 1- and 5-second schedule.
+- Other failures, including unclassified custom-provider errors, HTTP 5xx
+  without the rate-limit signal (including the recognized `overloaded_error`,
+  `api_error`, and `server_error` codes), transport errors, and timeouts, get three
+  retries with 4-, 16-, and 64-second base delays and the same jitter.
+
+Whether each recognized provider error code is permanent, a request fault, or
+follows the HTTP status is one exhaustive table in
+[`completionObservation.ts`](https://github.com/stripe/forge/blob/main/src/contracts/completionObservation.ts), so a
+new code cannot ship unclassified. A custom `CompletionProvider` steers the
+policy only by throwing a `CompletionInvocationError`, or an error with a
+string `code` and an `observation` of the same shape; the
+`CompletionProvider.complete` documentation lists the effects. Providers must
+not retry on their own.
+
+Rate-limit, short, and fallback retries each have a separate budget per logical
+request. Mixed failures can use at most 12 calls in total. Failures that cannot
+be classified use the bounded fallback schedule; non-finite random samples use
+the full scheduled delay. Cancellation interrupts waits and prevents further
+calls. Waits spend the plan's run timeout. When the next wait would reach that
+deadline, the request is exhausted instead: a judge criterion records
+`request_error` and the run still commits, so a rate-limited judge cannot cost
+the run its result. A wait already in progress when the deadline fires, or a
+provider call that outlasts it, still aborts the run. Regrades have no run
+deadline. Clock, random source, and sleep can be supplied through Ava and
+judge execution options, and through the `completionRetry` input of the
+regrade functions, for deterministic hosts.
+The exported legacy attempt constants describe the short schedule. Observation
+callbacks cannot change retry or cancellation outcomes. If the measurement
+clock fails, the per-call wait stays absent (unknown) rather than becoming zero.
+
+Built-in HTTP failures carry a `CompletionTransportObservation` with origin
+`host_transport` through the public `CompletionInvocationError`. It includes
+HTTP status and, when valid, normalized `retry_after_ms`, a request ID, and a
+recognized provider error code. OpenAI reads only `x-request-id`; Anthropic
+reads only `request-id`. IDs must be at most 128 ASCII letters, digits,
+underscores, or hyphens and begin with a letter or digit. The error-envelope
+parser reads at most 16 KiB and accepts only the
+[recognized code/type values](https://github.com/stripe/forge/blob/main/src/contracts/completionObservation.ts).
+Bodies, arbitrary headers, and endpoint URLs are never retained. An unreadable
+or locked error body leaves the provider error code unknown while preserving
+validated headers and status. Cleanup does not wait for stream cancellation.
+
+`result.json.completion_calls` retains the first 1,024 provider calls per
+eval, including failures before a later success. Optional `http_status`,
+`request_id`, `provider_error_code`, `retry_ordinal`, and `retry` fields
+record each subattempt. `status` stays the call's own outcome. Ordinals start
+at zero for each Ava decision or judge criterion. `retry` appears when the
+retry policy decided after the call: `decision` is `retry`, `rate_limit_retry`,
+or `exhausted`, and `wait_ms` measures elapsed sleep, bounded by the selected
+delay, including interrupted waits. A call whose reply arrived but failed the
+caller's parse is recorded as `succeeded` and still carries its `retry`
+decision.
+`completion_call_totals` counts all calls, failed calls, omitted summaries,
+and measured `rate_limit_wait_ms`, even after the cap. Regrades retain these
+records and counters for their new judge calls only; their reports do not
+include waits from the source run, and runs without judging criteria report
+no wait. Reused older regrades without counters leave the wait total absent. Older results may omit the new
+fields. These are observations and do not change plan digests. Attempts that
+fail before result commit do not persist these records.
 
 ## Evidence architecture
 
@@ -1510,10 +1581,10 @@ exact projected transcript for audit; it is not an input to a later judge call.
 
 At most four criteria run concurrently. Each request carries a 1,024-token
 output budget and a strict one-criterion JSON schema, with no temperature;
-the provider may adapt the output budget to the selected model. Each
-gets up to three attempts with fixed one- and five-second retry waits.
-Exhaustion records that criterion with `passed: null`, a bounded explanation,
-and an `error` containing
+the provider may adapt the output budget to the selected model. Each uses the
+shared [host completion retry policy](#host-side-completion-providers) with
+independent retry counts. Exhaustion records that criterion with `passed: null`,
+a bounded explanation, and an `error` containing
 `type` (`parse_error` or `request_error`), `attempts`, and `message`. The final
 unsuccessful attempt determines the error type. Other criteria continue, and
 the run commits its evidence, valid judgments, checks, and safe completion-call

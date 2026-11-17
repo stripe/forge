@@ -3,6 +3,7 @@ import type {
   AtifNormalizationWarning,
 } from '../atif/index.ts';
 import type { AgentToolResultOmission } from '../contracts/agent.ts';
+import type { CompletionProviderErrorCode } from '../contracts/completionObservation.ts';
 import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
@@ -127,7 +128,30 @@ export type CompletionStopReasonV1 =
   | 'model_context_window_exceeded'
   | 'other';
 
-export interface CompletionCallSummaryV1 {
+export const MAX_COMPLETION_CALL_SUMMARIES = 1024;
+/** Saved results accept this many attempts per request, independent of runtime tuning. */
+export const MAX_RECORDED_COMPLETION_ATTEMPTS = 12;
+
+export interface CompletionCallTotalsV1 {
+  readonly calls: number;
+  readonly failed: number;
+  readonly omitted: number;
+  readonly rate_limit_wait_ms: number;
+}
+
+export interface CompletionSubattemptRecordV1 {
+  readonly http_status?: number;
+  readonly request_id?: string;
+  readonly provider_error_code?: CompletionProviderErrorCode;
+  readonly retry_ordinal?: number;
+  /** What the retry policy decided after this call; absent when none applied. */
+  readonly retry?: {
+    readonly decision: 'retry' | 'rate_limit_retry' | 'exhausted';
+    readonly wait_ms: number;
+  };
+}
+
+export interface CompletionCallSummaryV1 extends CompletionSubattemptRecordV1 {
   readonly sequence: number;
   readonly purpose: CompletionPurposeV1;
   readonly provider: string;
@@ -328,6 +352,7 @@ interface RunResultCommon {
     cost_usd: number | null;
   };
   readonly completion_calls: readonly CompletionCallSummaryV1[];
+  readonly completion_call_totals?: CompletionCallTotalsV1;
   readonly interaction: {
     readonly mode: 'multi_turn' | 'one_shot';
     readonly turn_count: number;

@@ -972,6 +972,52 @@ describe('local artifact store', () => {
       parseRunResult({ ...result, completion_calls: calls }).completion_calls,
       calls,
     );
+    assert.equal(
+      parseRunResult({
+        ...result,
+        completion_calls: [{ ...call, retry_ordinal: 11 }],
+      }).completion_calls[0]!.retry_ordinal,
+      11,
+    );
+    const observedCall = {
+      ...calls[1]!,
+      http_status: 429,
+      request_id: 'req_synthetic',
+      provider_error_code: 'rate_limit_error',
+      retry_ordinal: 0,
+      retry: { decision: 'rate_limit_retry', wait_ms: 2000 },
+    };
+    const observed = parseRunResult({
+      ...result,
+      completion_calls: [call, observedCall],
+      completion_call_totals: {
+        calls: 2,
+        failed: 1,
+        omitted: 0,
+        rate_limit_wait_ms: 2000,
+      },
+    });
+    assert.equal(observed.completion_calls[1]!.retry?.wait_ms, 2000);
+    assert.equal(observed.completion_call_totals!.rate_limit_wait_ms, 2000);
+    for (const extra of [
+      { http_status: 999 },
+      { request_id: 'bad request id' },
+      { provider_error_code: 'arbitrary' },
+      { retry: { decision: 'rate_limit_retry', wait_ms: 64001 } },
+      { retry: { decision: 'succeeded', wait_ms: 0 } },
+      { retry: { decision: 'retry', wait_ms: 0, extra: true } },
+      { retry_ordinal: -1 },
+      { retry_ordinal: 12 },
+      { disposition: 'retry' },
+      { body: 'not allowed' },
+    ]) {
+      assert.throws(() =>
+        parseRunResult({
+          ...result,
+          completion_calls: [call, { ...observedCall, ...extra }],
+        }),
+      );
+    }
     assert.throws(
       () =>
         parseRunResult({
@@ -995,6 +1041,83 @@ describe('local artifact store', () => {
           completion_calls: [{ ...call, status: 'failed' }],
         }),
       /Failed completion calls require an error code\./,
+    );
+  });
+
+  it('rejects completion-call totals that disagree with the retained records', () => {
+    const result = resultFor([]);
+    const call = (sequence: number, extra: object = {}) => ({
+      sequence,
+      purpose: 'judge',
+      provider: 'test-provider',
+      provider_version: '1',
+      model: 'judge-model',
+      status: 'failed',
+      stop_reason: null,
+      input_tokens: null,
+      output_tokens: null,
+      cached_tokens: null,
+      cost_usd: null,
+      error_code: 'http_error',
+      ...extra,
+    });
+    const limited = {
+      retry: { decision: 'rate_limit_retry', wait_ms: 2000 },
+    };
+    const totals = (extra: object = {}) => ({
+      calls: 2,
+      failed: 2,
+      omitted: 0,
+      rate_limit_wait_ms: 2000,
+      ...extra,
+    });
+    const parse = (
+      completion_call_totals: object,
+      calls = [call(1, limited), call(2)],
+    ) =>
+      parseRunResult({
+        ...result,
+        completion_calls: calls,
+        completion_call_totals,
+      });
+    parse(totals());
+    for (const invalid of [
+      totals({ calls: 3 }),
+      totals({ calls: 1, failed: 1 }),
+      totals({ failed: 3 }),
+      totals({ failed: 1 }),
+      totals({ rate_limit_wait_ms: 1999 }),
+    ]) {
+      assert.throws(
+        () => parse(invalid),
+        /Completion-call totals disagree with retained records\./,
+      );
+    }
+
+    // At the retention cap the omitted calls are counted, not retained.
+    const retained = Array.from({ length: 1024 }, (_, index) =>
+      call(index + 1, limited),
+    );
+    const atCap = parse(
+      {
+        calls: 1026,
+        failed: 1026,
+        omitted: 2,
+        rate_limit_wait_ms: 1026 * 2000,
+      },
+      retained,
+    );
+    assert.equal(atCap.completion_call_totals?.omitted, 2);
+    assert.throws(() =>
+      parse(
+        {
+          calls: 1024,
+          failed: 1024,
+          omitted: 2,
+          rate_limit_wait_ms: 1024 * 2000,
+        },
+        retained,
+      ),
     );
   });
 

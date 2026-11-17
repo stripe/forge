@@ -538,9 +538,9 @@ describe('runConversation', () => {
     assert.deepEqual(result.failure, {
       status: 'role_player_error',
       errorType: 'request_error',
-      attempts: 3,
+      attempts: 4,
       message: 'gateway HTTP 400 using [REDACTED]',
-      explanation: 'Ava request failed after 3 attempts.',
+      explanation: 'Ava request failed after 4 attempts.',
     });
     assert.equal(result.avaAudit.decisions.at(-1)!.codingAgentInvoked, false);
     assert.deepEqual(result.avaAudit.decisions.at(-1)!.error, result.failure);

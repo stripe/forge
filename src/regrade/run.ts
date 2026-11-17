@@ -22,6 +22,7 @@ import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.ts';
 import { parseEvaluationResult, parseJudgeEvidence } from '../results/parse.ts';
 import type {
   CompletionCallSummaryV1,
+  CompletionCallTotalsV1,
   EvaluationResultV1,
   JudgeEvidenceV1,
   RunResultV1,
@@ -46,6 +47,7 @@ export interface RegradeResultV1 {
   /** Regraded criteria plus the run's original deterministic check results. */
   readonly evaluation: EvaluationResultV1;
   readonly completion_calls: readonly CompletionCallSummaryV1[];
+  readonly completion_call_totals?: CompletionCallTotalsV1;
   readonly regraded_at: string;
   readonly forge: ForgeBuildIdentity;
 }
@@ -97,7 +99,12 @@ export async function regradeCompletedRun(
     readonly judge: ModelRefV1;
     readonly signal?: AbortSignal;
     readonly now?: () => Date;
-    /** Test seam for the judge's fixed retry waits, as in execution. */
+    /** Clock, jitter, and sleep for judge retries; defaults to the wall clock. */
+    readonly completionRetry?: Pick<
+      CriterionJudgeExecutionOptions,
+      'now' | 'random' | 'sleep'
+    >;
+    /** @deprecated Use `completionRetry.sleep`; an explicit `sleep` wins. */
     readonly waitBeforeJudgeRetry?: CriterionJudgeExecutionOptions['waitBeforeRetry'];
   },
   dependencies: RegradeDependencies,
@@ -139,11 +146,19 @@ export async function regradeCompletedRun(
   });
   const criteria = await judgeCriteria(
     { ...judgeInputFromSavedRun({ plan, trajectory, judgeEvidence }), signal },
-    async (request) =>
-      (await completions.invoke('judge', request, request.signal ?? signal))
-        .content,
+    async (request, attempt) =>
+      (
+        await completions.invoke(
+          'judge',
+          request,
+          request.signal ?? signal,
+          attempt,
+        )
+      ).content,
     {
+      ...input.completionRetry,
       redactionSecrets: completions.secrets,
+      onRetryDecision: completions.recordRetryDecision,
       ...(input.waitBeforeJudgeRetry === undefined
         ? {}
         : { waitBeforeRetry: input.waitBeforeJudgeRetry }),
@@ -169,6 +184,7 @@ export async function regradeCompletedRun(
     }),
     evaluation,
     completion_calls: completions.calls,
+    completion_call_totals: completions.totals,
     regraded_at: (input.now ?? (() => new Date()))().toISOString(),
     forge: FORGE_BUILD_IDENTITY,
   });

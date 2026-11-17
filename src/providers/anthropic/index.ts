@@ -8,6 +8,7 @@ import type {
   CompletionStopReason,
   StrictCompletionResponseSchema,
 } from '../../contracts/completion.ts';
+import type { CompletionTransportObservation } from '../../contracts/completionObservation.ts';
 import {
   type CredentialReference,
   credentialReference,
@@ -15,6 +16,7 @@ import {
 import { isSafeMetadata, isSafeSimpleIdentifier } from '../../model/paths.ts';
 import type { ModelRefV1 } from '../../model/types.ts';
 import { FORGE_VERSION } from '../../version.ts';
+import { observeCompletionFailure } from '../transportObservation.ts';
 
 export const ANTHROPIC_MESSAGES_API_VERSION = '2023-06-01' as const;
 export const ANTHROPIC_STRUCTURED_OUTPUT_FORMAT = 'json_schema' as const;
@@ -70,6 +72,7 @@ export type AnthropicCompletionErrorCode =
   | 'aborted'
   | 'http_error'
   | 'invalid_credentials'
+  | 'invalid_output'
   | 'invalid_request'
   | 'invalid_response'
   | 'response_too_large'
@@ -81,6 +84,7 @@ export class AnthropicCompletionError extends Error {
   constructor(
     readonly code: AnthropicCompletionErrorCode,
     message: string,
+    readonly observation?: CompletionTransportObservation,
   ) {
     super(message);
     this.name = 'AnthropicCompletionError';
@@ -205,10 +209,15 @@ export function createAnthropicCompletionProvider(
         throw transportError(request.signal, timeoutSignal);
       }
       if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined);
+        const observation = await observeCompletionFailure(
+          response,
+          'anthropic',
+          signal,
+        );
         throw new AnthropicCompletionError(
           'http_error',
           `Anthropic completion request failed with HTTP ${response.status}.`,
+          observation,
         );
       }
 
@@ -641,13 +650,6 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
   }
   if (text.length === 0) throw invalidResponse();
   const content = text.join('');
-  if (structured) {
-    try {
-      JSON.parse(content);
-    } catch {
-      throw invalidResponse();
-    }
-  }
   const usage = value.usage;
   if (!isRecord(usage)) throw invalidResponse();
   const input = nonnegativeInteger(usage.input_tokens);
@@ -670,6 +672,16 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
   if (stopReason === undefined) throw invalidResponse();
   const costUsd = optionalCost(usage.cost_usd);
   if (costUsd === null) throw invalidResponse();
+  if (structured) {
+    try {
+      JSON.parse(content);
+    } catch {
+      throw new AnthropicCompletionError(
+        'invalid_output',
+        'Anthropic completion returned malformed structured output.',
+      );
+    }
+  }
   return Object.freeze({
     content,
     stopReason,

@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
+import { CompletionInvocationError } from '../contracts/completion.ts';
+import { defaultForgeEngine } from '../engine.ts';
+import { scoreEvaluation } from '../evaluation/score.ts';
 import { parseExperimentRunReport } from '../experimentReport.ts';
 import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
+  type ScriptedCompletionStep,
 } from '../testing/index.ts';
 import {
   ORIGINAL_JUDGMENT,
@@ -27,7 +31,7 @@ const failingJudgment = JSON.stringify({
   results: [{ index: 0, passed: false, explanation: 'Not shown.' }],
 });
 
-function dependencies(responses: string[]) {
+function dependencies(responses: ScriptedCompletionStep[]) {
   const scripted = createScriptedCompletionProvider({
     id: 'anthropic',
     responses,
@@ -92,6 +96,16 @@ describe('regradeExperimentRun', () => {
     );
     assert.equal(original.evaluation.score, 1);
     await assert.rejects(fs.access(path.join(output, '.regrade.lock')));
+    assert.ok(
+      saved.completion_calls.every(
+        (call: { purpose: string }) => call.purpose === 'judge',
+      ),
+    );
+    assert.equal(
+      report.runs[0]!.rate_limit_wait_ms,
+      saved.completion_call_totals.rate_limit_wait_ms,
+    );
+    assert.equal(report.summary.rate_limit_wait_ms, 0);
 
     // A rerun with the same judge reuses the saved regrade without judge calls.
     const second = dependencies([]);
@@ -101,6 +115,24 @@ describe('regradeExperimentRun', () => {
     );
     assert.equal(rerun.reused, 1);
     assert.equal(rerun.regraded, 0);
+    assert.equal(second.scripted.calls.length, 0);
+
+    // Reusing a legacy regrade cannot invent a measured wait total.
+    delete saved.completion_call_totals;
+    await fs.writeFile(
+      path.join(output, 'runs', 'regrade-source.json'),
+      JSON.stringify(saved),
+    );
+    const legacy = await regradeExperimentRun(
+      { experimentRun: source.experimentLocation, judge, output },
+      second.dependencies,
+    );
+    assert.equal(legacy.reused, 1);
+    const legacyReport = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
+    );
+    assert.equal(legacyReport.runs[0]!.rate_limit_wait_ms, undefined);
+    assert.equal(legacyReport.summary.rate_limit_wait_ms, undefined);
     assert.equal(second.scripted.calls.length, 0);
 
     // The source experiment run is untouched and still has its original score.
@@ -216,5 +248,94 @@ describe('regradeExperimentRun', () => {
       /outside the source experiment run/,
     );
     assert.equal(scripted.scripted.calls.length, 0);
+  });
+
+  it('reports the regrade judge calls and measured rate-limit waits', async () => {
+    const root = await temporaryRoot('forge-regrade-wait-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const output = path.join(root, 'regrade-waits');
+    const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
+    const limited = dependencies([
+      new CompletionInvocationError('http_error', 'Rate limited', {
+        origin: 'host_transport',
+        http_status: 429,
+        retry_after_ms: 3000,
+      }),
+      failingJudgment,
+    ]);
+    let elapsed = 0;
+    await regradeExperimentRun(
+      {
+        experimentRun: source.experimentLocation,
+        judge,
+        output,
+        completionRetry: {
+          now: () => elapsed,
+          random: () => 1,
+          sleep: async (ms) => {
+            elapsed += ms;
+          },
+        },
+      },
+      limited.dependencies,
+    );
+    const saved = JSON.parse(
+      await fs.readFile(
+        path.join(output, 'runs', 'regrade-source.json'),
+        'utf8',
+      ),
+    );
+    assert.deepEqual(saved.completion_calls[0].retry, {
+      decision: 'rate_limit_retry',
+      wait_ms: 3000,
+    });
+    assert.equal(saved.completion_call_totals.rate_limit_wait_ms, 3000);
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
+    );
+    assert.equal(report.runs[0]!.rate_limit_wait_ms, 3000);
+    assert.equal(report.summary.rate_limit_wait_ms, 3000);
+  });
+
+  it('reports no wait for runs without judging criteria, whatever the source run waited', async () => {
+    const root = await temporaryRoot('forge-regrade-notjudged-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const unjudged = {
+      ...defaultForgeEngine,
+      async verifyCompletedRun(location: string) {
+        const completed = await defaultForgeEngine.verifyCompletedRun(location);
+        return {
+          ...completed,
+          result: {
+            ...completed.result,
+            evaluation: scoreEvaluation([], completed.result.evaluation.checks),
+            completion_call_totals: {
+              calls: 3,
+              failed: 2,
+              omitted: 0,
+              rate_limit_wait_ms: 9000,
+            },
+          },
+        };
+      },
+    };
+    const output = path.join(root, 'regrade-unjudged');
+    const none = dependencies([]);
+    const summary = await regradeExperimentRun(
+      {
+        experimentRun: source.experimentLocation,
+        judge: { provider: 'anthropic', model: 'claude-opus-4-6' },
+        output,
+      },
+      { ...none.dependencies, engine: unjudged },
+    );
+    assert.equal(summary.not_judged, 1);
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
+    );
+    assert.equal(report.runs[0]!.rate_limit_wait_ms, undefined);
+    assert.equal(report.summary.rate_limit_wait_ms, undefined);
   });
 });

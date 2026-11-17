@@ -1,3 +1,4 @@
+import type { CompletionAttemptContext } from '../completionRetry.ts';
 import type {
   CompletionMessage,
   CompletionResponse,
@@ -25,4 +26,5 @@ export interface InteractionCompletionRequest {
 
 export type InteractionCompletionInvoker = (
   request: InteractionCompletionRequest,
+  attempt?: CompletionAttemptContext,
 ) => Promise<CompletionResponse>;

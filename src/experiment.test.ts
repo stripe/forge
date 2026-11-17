@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
+import { CompletionInvocationError } from './contracts/completion.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import { credentialReference } from './contracts/credentials.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
@@ -395,7 +396,7 @@ describe('public experiment run API', () => {
           },
         },
         responses: Array.from(
-          { length: 3 },
+          { length: 4 },
           () => new Error(`Provider rejected ${secret}: ${'x'.repeat(5000)}`),
         ),
       }).provider;
@@ -473,6 +474,56 @@ describe('public experiment run API', () => {
         /Provider rejected|REDACTED|private-provider-token/,
       );
     }
+  });
+
+  it('reports measured rate-limit waits from committed results', async () => {
+    const root = await experimentRunRoot();
+    const plan = createTestResolvedRunPlan({
+      judgingCriteria: ['The task is done.'],
+      judge: { provider: 'scripted', model: 'judge' },
+    });
+    const provider = createScriptedCompletionProvider({
+      id: 'scripted',
+      responses: [
+        new CompletionInvocationError('http_error', 'Rate limited', {
+          origin: 'host_transport',
+          http_status: 429,
+          retry_after_ms: 7000,
+        }),
+        JSON.stringify({
+          results: [{ index: 0, passed: true, explanation: 'Done.' }],
+        }),
+      ],
+    }).provider;
+    let elapsed = 0;
+    const summary = await runExperiment({
+      root,
+      engine: defaultForgeEngine,
+      plans: [plan],
+      composition: {
+        ...makeComposition(root),
+        completionProviders: new Map([[provider.id, provider]]),
+      },
+      resume: false,
+      signal: new AbortController().signal,
+      runIdFactory: () => 'rate-limited-run',
+      progress: () => {},
+      execute: (input) =>
+        executeEvalWithTestHooks(input, {
+          completionRetry: {
+            now: () => elapsed,
+            random: () => 1,
+            sleep: async (ms) => {
+              elapsed += ms;
+            },
+          },
+        }),
+    });
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(summary.report, 'utf8')),
+    );
+    assert.equal(report.runs[0]!.rate_limit_wait_ms, 7000);
+    assert.equal(report.summary.rate_limit_wait_ms, 7000);
   });
 
   it('reads a pending-only checkpoint using its Forge identity without companion artifacts', async () => {

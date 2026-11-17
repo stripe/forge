@@ -8,6 +8,7 @@ import type {
   CompletionStopReason,
   StrictCompletionResponseSchema,
 } from '../../contracts/completion.ts';
+import type { CompletionTransportObservation } from '../../contracts/completionObservation.ts';
 import {
   type CredentialReference,
   credentialReference,
@@ -15,6 +16,7 @@ import {
 import { isSafeMetadata, isSafeSimpleIdentifier } from '../../model/paths.ts';
 import type { ModelRefV1 } from '../../model/types.ts';
 import { FORGE_VERSION } from '../../version.ts';
+import { observeCompletionFailure } from '../transportObservation.ts';
 
 export const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1' as const;
 export const OPENAI_MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -42,6 +44,7 @@ export type OpenAICompletionErrorCode =
   | 'aborted'
   | 'http_error'
   | 'invalid_credentials'
+  | 'invalid_output'
   | 'invalid_request'
   | 'invalid_response'
   | 'response_too_large'
@@ -53,6 +56,7 @@ export class OpenAICompletionError extends Error {
   constructor(
     readonly code: OpenAICompletionErrorCode,
     message: string,
+    readonly observation?: CompletionTransportObservation,
   ) {
     super(message);
     this.name = 'OpenAICompletionError';
@@ -134,10 +138,15 @@ export function createOpenAICompletionProvider(
         throw transportError(request.signal, timeoutSignal);
       }
       if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined);
+        const observation = await observeCompletionFailure(
+          response,
+          'openai',
+          signal,
+        );
         throw new OpenAICompletionError(
           'http_error',
           `OpenAI completion request failed with HTTP ${response.status}.`,
+          observation,
         );
       }
       let raw: string;
@@ -560,13 +569,6 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
     }
   }
   const content = text.join('');
-  if (structured && stopReason === 'end_turn') {
-    try {
-      JSON.parse(content);
-    } catch {
-      throw invalidResponse();
-    }
-  }
   const usage = value.usage;
   if (!isRecord(usage)) throw invalidResponse();
   const input = nonnegativeInteger(usage.input_tokens);
@@ -588,6 +590,16 @@ function parseResponse(raw: string, structured: boolean): CompletionResponse {
     throw invalidResponse();
   const costUsd = optionalCost(usage.cost_usd);
   if (costUsd === null) throw invalidResponse();
+  if (structured && stopReason === 'end_turn') {
+    try {
+      JSON.parse(content);
+    } catch {
+      throw new OpenAICompletionError(
+        'invalid_output',
+        'OpenAI completion returned malformed structured output.',
+      );
+    }
+  }
   return Object.freeze({
     content,
     stopReason,

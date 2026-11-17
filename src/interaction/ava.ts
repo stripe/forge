@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  type CompletionRetryOptions,
+  isInvalidOutputFailure,
+  retryCompletion,
+} from '../completionRetry.ts';
 import type { StrictCompletionResponseSchema } from '../contracts/completion.ts';
 import { boundedErrorMessage } from '../security/errorMessage.ts';
 import type {
@@ -12,12 +17,12 @@ import {
   buildAvaInitializationPrompt,
 } from './prompt.ts';
 
+/** Attempt limit for the short structured-output/client-error schedule. */
 export const MAX_AVA_ATTEMPTS = 3;
 export const MAX_AVA_NEEDS = 6;
 export const MAX_AVA_NEED_DESCRIPTION_CHARACTERS = 240;
 export const MAX_AVA_MESSAGE_CHARACTERS = 500;
 
-const AVA_RETRY_DELAYS_MS = [1_000, 5_000] as const;
 const NEVER_ABORTED_SIGNAL = new AbortController().signal;
 
 export interface AvaRolePlayerOptions extends AvaPromptInputs {
@@ -26,14 +31,9 @@ export interface AvaRolePlayerOptions extends AvaPromptInputs {
   readonly signal?: AbortSignal;
 }
 
-export interface AvaRolePlayerExecutionOptions {
+export interface AvaRolePlayerExecutionOptions extends CompletionRetryOptions {
   /** Credentials to redact from custom invoker request-error diagnostics. */
   readonly redactionSecrets?: readonly string[];
-  /** Test seam for the otherwise fixed one- and five-second retry delays. */
-  readonly waitBeforeRetry?: (
-    failedAttempt: number,
-    signal: AbortSignal,
-  ) => Promise<void>;
 }
 
 export interface AvaNeed {
@@ -315,33 +315,38 @@ export class AvaRolePlayer {
         : continuationResponseFormat(remainingNeedIds),
       signal: this.#signal,
     } as const;
-    const waitBeforeRetry =
-      this.#executionOptions.waitBeforeRetry ?? waitBeforeAvaRetry;
     let finalError: AvaError | undefined;
 
-    for (let attempt = 1; attempt <= MAX_AVA_ATTEMPTS; attempt += 1) {
-      throwIfAborted(this.#signal);
-      let raw: string | undefined;
-      try {
-        const response = await this.#completion(request);
-        if (!response || typeof response.content !== 'string') {
-          throw new TypeError('Completion returned invalid content.');
+    const outcome = await retryCompletion<AvaTurn>(
+      this.#signal,
+      this.#executionOptions,
+      async (attempt, context) => {
+        throwIfAborted(this.#signal);
+        let raw: string;
+        try {
+          const response = await this.#completion(request, context);
+          if (!response || typeof response.content !== 'string') {
+            throw new TypeError('Completion returned invalid content.');
+          }
+          raw = response.content;
+        } catch (error) {
+          if (isAbort(error, this.#signal)) throw error;
+          // Malformed model output is the same fault whether the provider or
+          // the parser caught it.
+          const malformed = isInvalidOutputFailure(error);
+          finalError = avaError(
+            malformed ? 'parse_error' : 'request_error',
+            attempt,
+            boundedErrorMessage(
+              error,
+              malformed
+                ? 'Ava response was not valid.'
+                : 'Ava completion request failed.',
+              this.#executionOptions.redactionSecrets,
+            ),
+          );
+          return { ok: false, error, parseFailure: malformed };
         }
-        raw = response.content;
-      } catch (error) {
-        if (isAbort(error, this.#signal)) throw error;
-        finalError = avaError(
-          'request_error',
-          attempt,
-          boundedErrorMessage(
-            error,
-            'Ava completion request failed.',
-            this.#executionOptions.redactionSecrets,
-          ),
-        );
-      }
-
-      if (raw !== undefined) {
         try {
           const turn = initializing
             ? this.#initializeFromResponse(raw, lastAgentResponse === undefined)
@@ -349,7 +354,7 @@ export class AvaRolePlayer {
           if (turn.message) {
             this.#history.push({ role: 'assistant', content: turn.message });
           }
-          return turn;
+          return { ok: true, value: turn };
         } catch (error) {
           if (isAbort(error, this.#signal)) throw error;
           finalError = avaError(
@@ -357,14 +362,11 @@ export class AvaRolePlayer {
             attempt,
             responseRejectionMessage(error),
           );
+          return { ok: false, error, parseFailure: true };
         }
-      }
-
-      if (attempt < MAX_AVA_ATTEMPTS) {
-        await waitBeforeRetry(attempt, this.#signal);
-      }
-    }
-
+      },
+    );
+    if (outcome.ok) return outcome.value;
     return this.#errorTurn(finalError!);
   }
 
@@ -505,31 +507,4 @@ function throwIfAborted(signal: AbortSignal): void {
   throw signal.reason instanceof Error
     ? signal.reason
     : new DOMException('The operation was aborted.', 'AbortError');
-}
-
-function waitBeforeAvaRetry(
-  failedAttempt: number,
-  signal: AbortSignal,
-): Promise<void> {
-  const delayMs = AVA_RETRY_DELAYS_MS[failedAttempt - 1];
-  if (delayMs === undefined) return Promise.resolve();
-  throwIfAborted(signal);
-  return new Promise((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout>;
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      reject(
-        signal.reason instanceof Error
-          ? signal.reason
-          : new DOMException('The operation was aborted.', 'AbortError'),
-      );
-    };
-    timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, delayMs);
-    signal.addEventListener('abort', onAbort, { once: true });
-    if (signal.aborted) onAbort();
-  });
 }
