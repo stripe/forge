@@ -1,4 +1,5 @@
 import { sha256Digest } from '../model/hashes.ts';
+import { judgeMethodOf } from '../model/judgeMethod.ts';
 import {
   ancestorDirectories,
   assertDatasetSetupInputs,
@@ -13,6 +14,7 @@ import {
   type ExperimentConfigV1,
   type ExperimentMatrixGroupV1,
   type ForgeDockerRuntimeV1,
+  type JudgeModelRefV1,
   type LoadedDatasetV1,
   type LoadedExperimentConfigV1,
   type ModelRefV1,
@@ -251,7 +253,7 @@ export function resolveRunPlanWithSetupActions(
         : { example_answer: definition.example_answer }),
       ...(definition.judging_criteria.length === 0
         ? {}
-        : { judge: cloneJson(config.models.judge ?? DEFAULT_HOST_MODEL) }),
+        : { judge: planJudge(config.models.judge ?? DEFAULT_HOST_MODEL) }),
     },
     ...(definition.execution_mode !== 'multi_turn'
       ? {}
@@ -447,4 +449,19 @@ function deepFreeze<T>(value: T): T {
     Object.freeze(value);
   }
   return value;
+}
+
+/**
+ * The planned judge. A judge without a method keeps its exact plan identity;
+ * verbalized sampling records its candidate count.
+ */
+function planJudge(judge: JudgeModelRefV1): JudgeModelRefV1 {
+  const method = judgeMethodOf(judge);
+  return {
+    provider: judge.provider,
+    model: judge.model,
+    ...(method === undefined
+      ? {}
+      : { mode: method.mode, candidates: method.candidates }),
+  };
 }

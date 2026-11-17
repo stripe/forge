@@ -3,6 +3,7 @@ import type {
   AgentSelectionV1,
   ChecksV1,
   ForgeRuntimeV1,
+  JudgeModelRefV1,
   JudgingCriterionInputV1,
   ModelRefV1,
   ResolvedRunPlanV1,
@@ -20,7 +21,7 @@ export interface TestResolvedRunPlanOptions {
   readonly maxTurns?: number;
   readonly judgingCriteria?: readonly JudgingCriterionInputV1[];
   readonly rolePlayer?: ModelRefV1;
-  readonly judge?: ModelRefV1;
+  readonly judge?: JudgeModelRefV1;
   readonly agent?: AgentSelectionV1;
   readonly caseSetup?: readonly SetupStepV1[];
   readonly treatment?: string;
