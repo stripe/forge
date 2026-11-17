@@ -1246,7 +1246,9 @@ rejecting ambiguous sequences. Compacted exports fall back before native text
 reconciliation, so the driver trajectory uses that summary-free reply.
 
 Before persistence or scoring, Forge redacts every resolved run and completion
-secret from the normalized trajectory. Provenance in `result.json` records:
+secret from the normalized trajectory. A secret that JSON escaping changes is
+also redacted in its escaped spelling, as in the JSON text Forge builds from
+Codex `structured_content`. Provenance in `result.json` records:
 
 - source kind and native format;
 - exact session ID when applicable;

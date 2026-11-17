@@ -5,12 +5,20 @@ export interface RedactionResult<T> {
   readonly replacements: number;
 }
 
-/** Replace exact resolved credential values throughout a JSON-compatible value. */
+/**
+ * Replace exact resolved credential values throughout a JSON-compatible value.
+ * A credential that JSON escaping changes (a quote, backslash, or tab) is also
+ * matched in its escaped spelling, which text produced by serializing JSON
+ * carries.
+ */
 export function redactSecrets<T>(
   value: T,
   secrets: readonly string[],
 ): RedactionResult<T> {
-  const normalizedSecrets = normalizeSecrets(secrets);
+  const normalizedSecrets = normalizeSecrets([
+    ...secrets,
+    ...secrets.map((secret) => JSON.stringify(secret).slice(1, -1)),
+  ]);
   let replacements = 0;
 
   const redactString = (input: string): string => {

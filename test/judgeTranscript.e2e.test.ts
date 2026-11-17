@@ -343,3 +343,60 @@ it.each([
     }
   },
 );
+
+it('redacts a credential that JSON serialization escaped inside result text', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-result-json-'));
+  try {
+    const secret = 'quoted"credential\\suffix';
+    const escaped = JSON.stringify(secret).slice(1, -1);
+    const agent = createScriptedAgentAdapter({
+      requirements: {
+        executables: [],
+        stateDirectories: [],
+        environment: {
+          credentials: {
+            TEST_TOKEN: { reference: credentialReference('test.key') },
+          },
+        },
+      },
+      turns: [
+        {
+          text: 'Done.',
+          sessionId: 'selected',
+          toolCalls: [
+            {
+              id: 'call',
+              name: 'mcp__server__tool',
+              result: {
+                content: `Structured result:\n${JSON.stringify({ token: secret })}`,
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const completed = await executeEval({
+      runId: 'escaped-secret',
+      plan: createTestResolvedRunPlan(),
+      composition: {
+        runtime: createFakeRuntimeAdapter().adapter,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+        credentialResolver: createStaticCredentialResolver({
+          'test.key': secret,
+        }),
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: createArtifactStore({ root }),
+      },
+    });
+    await verifyCompletedRun(completed.location);
+    for (const name of ['interaction.json', 'trajectory.json']) {
+      const body = JSON.parse(
+        await fs.readFile(path.join(completed.location, name), 'utf8'),
+      );
+      assert.equal(JSON.stringify(body).includes(escaped), false, name);
+      assert.match(JSON.stringify(body), /\[REDACTED\]/);
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
