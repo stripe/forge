@@ -49,7 +49,9 @@ import {
   createAnthropicCompletionProvider,
 } from './providers/anthropic/index.ts';
 import { createOpenAICompletionProvider } from './providers/openai/index.ts';
+import type { RegradeDiff } from './regrade/diff.ts';
 import { regradeExperimentRun } from './regrade/experiment.ts';
+import { diffRegradeExperimentRun } from './regrade/loadDiff.ts';
 import { createArtifactStore } from './results/index.ts';
 import {
   createDockerRuntimeAdapter,
@@ -96,6 +98,8 @@ const HOST_CLI_OPTIONS = {
   'experiment-run': { type: 'string' },
   'judge-provider': { type: 'string' },
   'judge-model': { type: 'string' },
+  regrade: { type: 'string' },
+  json: { type: 'boolean' },
   host: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean' },
@@ -120,6 +124,7 @@ const USAGE = `Usage:
   forge plan --experiment <file> [selection options]
   forge run --experiment <file> [selection options] [run options]
   forge run --experiment <file> --resume <experiment-run-id> [run options]
+  forge regrade diff --experiment-run <directory> --regrade <directory> [--json]
   forge regrade --experiment-run <directory> --judge-provider <id> --judge-model <id> --output <directory> [--jobs <count>]
 
 Selection options:
@@ -153,6 +158,10 @@ Regrade options:
   --jobs <count>                Maximum simultaneous run regrades (default: 1)
   --credential-env <reference>=<environment-name>
                                  Bind an opaque credential reference for the judge
+
+Regrade diff options:
+  --regrade <directory>         Directory holding saved runs/<run-id>.json regrades
+  --json                       Print the comparison as JSON instead of text
 
 The experiment's dataset.path locates the dataset relative to the experiment file.
 The run command executes every matching matrix entry with bounded concurrency.
@@ -293,6 +302,35 @@ export async function runCli(
     if (parsed.values.help || command === 'help') {
       stdout(USAGE);
       return 0;
+    }
+    if (command === 'regrade' && parsed.positionals[1] === 'diff') {
+      if (parsed.positionals.length !== 2)
+        throw new CliUsageError(
+          'Expected regrade diff with no extra arguments.',
+        );
+      assertAllowedOptions(parsed.values, [
+        'experiment-run',
+        'regrade',
+        'json',
+      ]);
+      const required = (name: 'experiment-run' | 'regrade'): string => {
+        const value = parsed.values[name];
+        if (typeof value !== 'string' || value.length === 0)
+          throw new CliUsageError(`regrade diff requires --${name}.`);
+        return path.resolve(options.cwd ?? process.cwd(), value);
+      };
+      const diff = await diffRegradeExperimentRun({
+        experimentRun: required('experiment-run'),
+        regrade: required('regrade'),
+        engine,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      });
+      stdout(
+        parsed.values.json
+          ? `${JSON.stringify(diff)}\n`
+          : renderRegradeDiff(diff),
+      );
+      return diff.coverage === 'complete' ? 0 : 1;
     }
     if (parsed.positionals.length !== 1 || !isCommand(command)) {
       throw new CliUsageError(
@@ -1102,6 +1140,45 @@ async function runRegradeCommand(
   );
   stdout(`${JSON.stringify(summary)}\n`);
   return summary.failed.length === 0 ? 0 : 1;
+}
+
+function renderRegradeDiff(diff: RegradeDiff): string {
+  const number = (value: number | null) =>
+    value === null ? 'n/a' : String(value);
+  const agreement = (value: RegradeDiff['agreement']) =>
+    `${value.matched}/${value.total} (${value.rate === null ? 'n/a' : `${(100 * value.rate).toFixed(1)}%`})`;
+  return [
+    `Coverage: ${diff.coverage}`,
+    `Verdict agreement: ${agreement(diff.agreement)}`,
+    ...Object.entries(diff.agreement_by_requirement).map(
+      ([level, value]) => `${level}: ${agreement(value)}`,
+    ),
+    `Mean score change (regrade - source): ${number(diff.mean_score_change)}`,
+    ...diff.runs.map(
+      (run) =>
+        `${run.run_id}: ${number(run.source_score)} -> ${number(run.regrade_score)} (change ${number(run.score_change)}); status ${run.source_status} -> ${run.regrade_status}`,
+    ),
+    `Flipped criteria: ${diff.flipped_criteria.length}`,
+    ...diff.flipped_criteria.map(
+      (criterion) =>
+        `${criterion.run_id} [${criterion.criterion_index}] ${criterion.requirement_level}: ${criterion.source_passed} -> ${criterion.regrade_passed}`,
+    ),
+    `Judge errors: ${diff.judge_errors.length}`,
+    ...diff.judge_errors.map(
+      (criterion) =>
+        `${criterion.side} ${criterion.run_id} [${criterion.criterion_index}] ${criterion.requirement_level}: ${criterion.error.type} (${criterion.error.attempts} attempts)`,
+    ),
+    `Missing regrades: ${diff.missing_regrades.length}`,
+    ...diff.missing_regrades,
+    `Excluded records: ${diff.issues.length}`,
+    ...diff.issues.map(
+      (issue) =>
+        `${issue.side} ${issue.run_id ?? `selection ${issue.selection_index ?? 'unknown'}`}: ${issue.state} (${issue.reason})`,
+    ),
+    `Runs without judging criteria: ${diff.not_judged.length}`,
+    ...diff.not_judged,
+    '',
+  ].join('\n');
 }
 
 class CliUsageError extends Error {

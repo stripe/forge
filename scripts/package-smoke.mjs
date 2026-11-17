@@ -156,6 +156,14 @@ try {
       }
       assert.equal(typeof regrade.regradeCompletedRun, 'function');
       assert.equal(typeof regrade.regradeExperimentRun, 'function');
+      assert.equal(typeof regrade.compareRegradeResults, 'function');
+      assert.equal(typeof regrade.diffRegradeExperimentRun, 'function');
+      const emptyDiff = regrade.compareRegradeResults({sourceRuns: [], regrades: []});
+      assert.equal(emptyDiff.coverage, 'complete');
+      assert.deepEqual(emptyDiff.issues, []);
+      assert.equal(emptyDiff.agreement.rate, null);
+      assert.equal('compareRegradeResults' in forge, false);
+      assert.equal('diffRegradeExperimentRun' in forge, false);
       assert.equal(typeof regrade.judgeInputFromSavedRun, 'function');
       assert.equal('regradeCompletedRun' in forge, false);
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
