@@ -409,6 +409,27 @@ describe('collectJudgeWorkspaceEvidence', () => {
     assert.equal(collected.evidence.truncated, true);
   });
 
+  it('drops ineligible entries before capping a listing that ignored the exclusions', async () => {
+    const test = fixture({ bodies: { 'src/app.ts': 'app' } });
+    const workspace = {
+      ...test.workspace,
+      listFiles: async () => [
+        file('node_modules/a/index.js', 1),
+        file('node_modules/b/index.js', 1),
+        file('src/app.ts', 3),
+      ],
+    };
+    const collected = await collectJudgeWorkspaceEvidence(workspace, {
+      maxEntries: 2,
+    });
+    assert.deepEqual(
+      collected.evidence.entries.map(({ path }) => path),
+      ['src/app.ts'],
+    );
+    assert.deepEqual(collected.evidence.warnings, []);
+    assert.equal(collected.evidence.truncated, false);
+  });
+
   it('stops in lexical order before evidence beyond the depth bound', async () => {
     const test = fixture({
       entries: [file('a.txt', 1), file('level/too/deep.txt', 4)],

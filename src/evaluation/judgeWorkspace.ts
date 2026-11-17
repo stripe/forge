@@ -242,16 +242,18 @@ export async function collectJudgeWorkspaceEvidence(
     }
   }
 
-  const ordered = [...listed].sort((left, right) =>
-    compareCodeUnits(left.path, right.path),
-  );
+  const symlinkRoots = listed
+    .filter(({ kind }) => kind === 'symlink')
+    .map(({ path }) => path);
+  // A runtime that ignored the listing contract may return more than was
+  // requested; drop what could never be read before cutting the sorted prefix.
+  const ordered = listed
+    .filter((entry) => isEligibleFile(entry, symlinkRoots))
+    .sort((left, right) => compareCodeUnits(left.path, right.path));
   if (ordered.length > limits.maxEntries) {
     if (!entryLimitRecorded) stop(entryLimit(limits.maxEntries));
     ordered.length = limits.maxEntries;
   }
-  const symlinkRoots = ordered
-    .filter(({ kind }) => kind === 'symlink')
-    .map(({ path }) => path);
 
   for (const entry of ordered) {
     options.signal?.throwIfAborted();
