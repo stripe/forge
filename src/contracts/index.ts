@@ -9,7 +9,12 @@ export type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
 } from './metadata.ts';
-export * from './observability.ts';
+export type {
+  RunEvent,
+  RunEventType,
+  RunObserver,
+  RunPhase,
+} from './observability.ts';
 export * from './plugin.ts';
 export * from './pluginReceipt.ts';
 export * from './runtime.ts';

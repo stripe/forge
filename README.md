@@ -82,7 +82,8 @@ agent receives its credential and outbound network access. Keep secrets outside
 dataset and experiment files.
 
 Ava and the judge each default to `provider: openai`, `model: gpt-6.1-sol`
-when their model is omitted. Override either independently with
+when their model is omitted. Both leave sampling at the model default and
+request no temperature. Override either independently with
 `models.role_player` or `models.judge`; the other keeps its default. Both
 accept `provider: anthropic` or `provider: openai`. Selecting a coding agent
 does not change either host model. For example, to use Sonnet for both:
@@ -96,12 +97,18 @@ models:
 OpenAI Ava/judge models use `--credential-env OPENAI_API_KEY`. They use the
 Responses API with strict JSON Schema and `store: false`. `OPENAI_BASE_URL`
 optionally sets the complete API root, including `/v1`; Forge appends
-`/responses`. GPT-5 and later and o-series model identifiers omit `temperature`
-and receive an output budget of at least 16,000 tokens to allow for reasoning.
+`/responses`. GPT-5 and later and o-series model identifiers receive an output
+budget of at least 16,000 tokens to allow for reasoning.
 Reasoning blocks are excluded from completion text.
 
 Anthropic Ava/judge models use `--credential-env ANTHROPIC_API_KEY` and require
-Claude 4.5-or-newer model identifiers with strict structured-output support.
+Claude Haiku, Sonnet, or Opus 4.5-or-newer model identifiers with strict
+structured-output support. Claude Fable is not supported yet as the judge or
+Ava model; Forge rejects it during pure preflight, before credential lookup
+or model requests. Coding-agent model selection is separate.
+Haiku, Sonnet, and Opus models at version 5 or newer always think, and thinking
+tokens share the output budget with answer text. Forge gives them at least
+16,000 output tokens and excludes thinking blocks from completion text.
 
 For an Anthropic-compatible service, set both `ANTHROPIC_BASE_URL` and
 `ANTHROPIC_AUTH_TOKEN`. When the URL is present,
@@ -580,6 +587,24 @@ qualify. These group rates ignore file checks. MUST failures identify unmet
 requirements; SHOULD failures identify unmet recommendations. OPTIONAL
 statistics are telemetry and do not enter either scored group.
 
+Execution errors appear in the experiment's `experiment.json` attempt history
+and `report.json` run rows. When available, the attempt's `diagnostic` records
+the phase, a timeout/cancellation/failure reason, and a bounded,
+credential-redacted message, even if the run failed before saving artifacts.
+The attempt's optional `error_phase` retains the known phase independently of
+message detail. Only the engine mints execution diagnostics; host-added ones
+are ignored, and malformed diagnostics are dropped before checkpoint writes.
+After credentials are resolved, any `Error.message` can become a redacted
+diagnostic. Custom adapters and providers must keep sensitive data other than
+resolved credentials out of error messages.
+Attempt diagnostics and stderr progress can include role-player provider error
+text. Report rows retain only the stable `error_code` and `diagnostic.phase`,
+without diagnostic messages or reasons. Older attempts and plain host callback
+failures may have only `error_code`; host-thrown Forge errors also retain a valid
+phase, without trusting host-authored diagnostic text. For a committed Ava failure,
+`result.json.failure.message` records the final request or output rejection
+reason; raw rejected responses are not saved.
+
 ### Inspect evidence
 
 Runs may also contain `workspace-evidence.json`, `judge-evidence.json`, and
@@ -606,6 +631,44 @@ for verification, judge-visible projections, and fidelity limits.
 When using Forge as a library, you can
 [supply your own Dockerfile](docs/architecture.md#custom-docker-images) while
 reusing its container lifecycle. The CLI uses the packaged image.
+
+### Regrade saved runs
+
+`forge regrade` judges a saved experiment run again with a different judge,
+without re-running any coding agent or Ava turn. Each completed run is verified
+first. Its transcript is projected from the saved `trajectory.json`, and its
+workspace text comes from the saved `judge-evidence.json`, so the new judge
+receives the same evidence and prompt as the original judge:
+
+```sh
+npx --no-install forge regrade \
+  --experiment-run ./results/experiments/EXPERIMENT_RUN_ID \
+  --judge-provider anthropic --judge-model claude-opus-4-6 \
+  --output ./regrades/opus-4-6 --jobs 4
+```
+
+The source experiment run is only read; `--output` must be a new location
+outside it. Each regrade is written to `runs/<run-id>.json` there, with the
+judge, the new evaluation, its completion calls, and digests of the saved
+inputs. `report.json` aggregates the regraded evaluations with the standard
+report format, and `regrade.json` summarizes the invocation. In the regrade
+report, each regraded row's `regrade_path` (relative to the report's directory)
+points to the evaluation behind its scores. Its `result_path` still points to
+the original execution, relative to the report's `result_root`, which is the
+source experiment run. Rerunning the same command reuses regrades for the same
+judge and committed result, so an interrupted regrade can be continued. An
+output that already holds regrades from another judge reports those runs as
+failed instead of mixing judges. Only one regrade can write to an output at a
+time: a second concurrent invocation fails, naming the output, instead of
+interleaving its results.
+
+Deterministic file checks are not re-run, because the workspace is gone after
+a run; each regrade keeps the run's original check results. The judge sees
+only the bounded workspace excerpts captured at run time. Runs without judging
+criteria keep their checks-only evaluation. Runs that could not be regraded
+appear as pending in the regrade report, and the command exits with status 1.
+Library hosts can call `regradeCompletedRun` and `regradeExperimentRun` from
+`@stripe/forge/regrade`.
 
 ## Development
 

@@ -993,6 +993,7 @@ describe('unified live end-to-end suite', () => {
         credential: 'live.completion-credential',
         async fetch(_input, init) {
           const request = JSON.parse(String(init?.body));
+          assert.equal(Object.hasOwn(request, 'temperature'), false);
           assert.equal(request.output_config.format.type, 'json_schema');
           assert.equal(
             request.output_config.format.schema.properties.results.items
@@ -1019,6 +1020,7 @@ describe('unified live end-to-end suite', () => {
           context: forge.CompletionProviderCallContext,
         ) {
           assert.equal(request.purpose, 'judge');
+          assert.equal(Object.hasOwn(request, 'temperature'), false);
           assert.equal(
             request.responseSchema,
             forge.CRITERION_JUDGMENT_RESPONSE_SCHEMA,

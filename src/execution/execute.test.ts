@@ -645,6 +645,305 @@ describe('executeEval', () => {
     assert.equal(fixture.calls.at(-1), 'runtime:dispose');
   });
 
+  it('uses a fixed note before all diagnostic secrets are known, preserving Forge codes and phases', async () => {
+    const failures = [
+      new Error(`Resolver rejected ${SECRET}`),
+      new ForgeExecutionError(
+        'credential_failed',
+        'preflight',
+        `Resolver rejected ${SECRET}`,
+      ),
+      Object.defineProperty(
+        new ForgeExecutionError(
+          'setup_failed',
+          'setup',
+          `Resolver rejected ${SECRET}`,
+        ),
+        'diagnostic',
+        {
+          value: { reason: 'failure', message: `Private diagnostic ${SECRET}` },
+        },
+      ),
+    ];
+    for (const failure of failures) {
+      const fixture = await executionFixture();
+      const composition = fixture.composition(inertStore());
+      await assert.rejects(
+        executeEval({
+          runId: 'early-credential-failure',
+          plan: fixture.plan,
+          composition: {
+            ...composition,
+            credentialResolver: {
+              async resolve() {
+                throw failure;
+              },
+            },
+          },
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof ForgeExecutionError);
+          const code =
+            failure instanceof ForgeExecutionError
+              ? failure.code
+              : 'credential_failed';
+          const phase =
+            failure instanceof ForgeExecutionError
+              ? failure.phase
+              : 'preflight';
+          const message = `Forge failed during ${phase}.`;
+          assert.equal(error.code, code);
+          assert.equal(error.phase, phase);
+          assert.equal(error.message, message);
+          assert.deepEqual(error.diagnostic, { reason: 'failure', message });
+          assert.doesNotMatch(
+            JSON.stringify(error.diagnostic),
+            /Resolver|Private|sk-ant-test-secret/,
+          );
+          return true;
+        },
+      );
+      assert.equal(fixture.calls.includes('runtime:prepare'), false);
+    }
+  });
+
+  it('uses a fixed diagnostic for a plain error during pure preflight', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(inertStore());
+    const failure = new Error(`Preflight rejected ${SECRET}`);
+    await assert.rejects(
+      executeEval({
+        runId: 'early-preflight-failure',
+        plan: fixture.plan,
+        composition: {
+          ...composition,
+          runtime: {
+            ...composition.runtime,
+            preflight() {
+              throw failure;
+            },
+          },
+        },
+      }),
+      {
+        code: 'invalid_plan',
+        phase: 'preflight',
+        message: 'Forge failed during preflight.',
+        cause: failure,
+        diagnostic: {
+          reason: 'failure',
+          message: 'Forge failed during preflight.',
+        },
+      },
+    );
+    assert.equal(fixture.calls.includes('runtime:prepare'), false);
+  });
+
+  it('ignores a host-added diagnostic and redacts its Error.message at the engine boundary', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(inertStore());
+    const agent = composition.agents.get('claude-code')!;
+    const failure = Object.defineProperty(
+      new ForgeExecutionError(
+        'agent_failed',
+        'interaction',
+        `Agent rejected ${SECRET}`,
+      ),
+      'diagnostic',
+      { value: { reason: 'failure', message: 'private host diagnostic' } },
+    );
+    await assert.rejects(
+      executeEval({
+        runId: 'host-diagnostic-redaction',
+        plan: fixture.plan,
+        composition: {
+          ...composition,
+          agents: new Map([
+            [
+              agent.id,
+              {
+                ...agent,
+                async openSession() {
+                  throw failure;
+                },
+              },
+            ],
+          ]),
+        },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof ForgeExecutionError);
+        assert.deepEqual(error.diagnostic, {
+          reason: 'failure',
+          message: 'Agent rejected [REDACTED]',
+        });
+        return true;
+      },
+    );
+  });
+
+  it('bounds and redacts fatal diagnostics while retaining the phase and original cause', async () => {
+    const fixture = await executionFixture();
+    const composition = fixture.composition(inertStore());
+    const agent = composition.agents.get('claude-code')!;
+    const failure = Object.assign(
+      new Error(`Agent rejected ${SECRET}: ${'x'.repeat(5000)}`),
+      { cause: new Error('private cause') },
+    );
+    await assert.rejects(
+      executeEval({
+        runId: 'diagnostic-redaction',
+        plan: fixture.plan,
+        composition: {
+          ...composition,
+          agents: new Map([
+            [
+              agent.id,
+              {
+                ...agent,
+                async openSession() {
+                  throw failure;
+                },
+              },
+            ],
+          ]),
+        },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof ForgeExecutionError);
+        assert.equal(error.code, 'agent_failed');
+        assert.equal(error.phase, 'interaction');
+        assert.equal(error.cause, failure);
+        assert.equal(error.diagnostic?.reason, 'failure');
+        assert.equal(error.diagnostic?.message.length, 4096);
+        assert.match(
+          error.diagnostic!.message,
+          /^Agent rejected \[REDACTED\]: x+…$/,
+        );
+        assert.doesNotMatch(
+          JSON.stringify(error.diagnostic),
+          /private cause|sk-ant-test-secret/,
+        );
+        return true;
+      },
+    );
+    assert.equal(fixture.calls.at(-1), 'runtime:dispose');
+  });
+
+  it('distinguishes plan timeout from caller cancellation even if cleanup outlasts the timeout', async () => {
+    for (const cancellation of [false, true]) {
+      const fixture = await executionFixture();
+      const composition = fixture.composition(inertStore());
+      const agent = composition.agents.get('claude-code')!;
+      const controller = new AbortController();
+      const plan = { ...fixture.plan, limits: { run_timeout_ms: 30 } };
+      await assert.rejects(
+        executeEval({
+          runId: cancellation ? 'cancelled' : 'timed-out',
+          plan,
+          signal: controller.signal,
+          composition: {
+            ...composition,
+            runtime: {
+              ...composition.runtime,
+              async prepare(context) {
+                const runtime = await composition.runtime.prepare(context);
+                return {
+                  ...runtime,
+                  async dispose() {
+                    if (cancellation)
+                      await new Promise((resolve) => setTimeout(resolve, 40));
+                    await runtime.dispose();
+                  },
+                };
+              },
+            },
+            agents: new Map([
+              [
+                agent.id,
+                {
+                  ...agent,
+                  async openSession(context) {
+                    if (cancellation)
+                      controller.abort(
+                        new DOMException(
+                          'private caller detail',
+                          'TimeoutError',
+                        ),
+                      );
+                    await new Promise<never>((_resolve, reject) => {
+                      if (context.signal.aborted) reject(context.signal.reason);
+                      else
+                        context.signal.addEventListener(
+                          'abort',
+                          () => reject(context.signal.reason),
+                          { once: true },
+                        );
+                    });
+                    throw new Error('unreachable');
+                  },
+                },
+              ],
+            ]),
+          },
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof ForgeExecutionError);
+          assert.equal(error.code, 'aborted');
+          assert.equal(error.phase, 'interaction');
+          assert.equal(
+            error.diagnostic?.reason,
+            cancellation ? 'cancelled' : 'timeout',
+          );
+          assert.match(
+            error.diagnostic!.message,
+            cancellation ? /Caller cancellation/ : /30ms/,
+          );
+          assert.doesNotMatch(
+            JSON.stringify(error.diagnostic),
+            /private caller detail/,
+          );
+          return true;
+        },
+      );
+      assert.equal(fixture.calls.at(-1), 'runtime:dispose');
+    }
+  });
+
+  it('does not replace an agent failure with a timeout which fires during cleanup', async () => {
+    const fixture = await executionFixture({ openSessionFailure: true });
+    const composition = fixture.composition(inertStore());
+    await assert.rejects(
+      executeEval({
+        runId: 'failure-before-timeout',
+        plan: { ...fixture.plan, limits: { run_timeout_ms: 30 } },
+        composition: {
+          ...composition,
+          runtime: {
+            ...composition.runtime,
+            async prepare(context) {
+              const runtime = await composition.runtime.prepare(context);
+              return {
+                ...runtime,
+                async dispose() {
+                  await new Promise((resolve) => setTimeout(resolve, 40));
+                  await runtime.dispose();
+                },
+              };
+            },
+          },
+        },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof ForgeExecutionError);
+        assert.equal(error.code, 'agent_failed');
+        assert.equal(error.diagnostic?.reason, 'failure');
+        assert.equal(error.diagnostic?.message, 'could not start agent');
+        return true;
+      },
+    );
+  });
+
   it('authorizes original shared-source references and preserves declared scopes', async () => {
     const fixture = await executionFixture();
     const step: ResolvedRunPlanV1['setup'][number] = {

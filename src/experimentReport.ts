@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  experimentRunDiagnosticSchema,
   experimentRunErrorCodeSchema,
   experimentRunIdSchema,
 } from './experimentModel.ts';
@@ -143,12 +144,27 @@ const runSchema = z
     run_id: experimentRunIdSchema.nullable(),
     state: z.enum(['pending', 'completed', 'errored']),
     error_code: experimentRunErrorCodeSchema.nullable(),
+    diagnostic: experimentRunDiagnosticSchema.pick({ phase: true }).optional(),
     attempt_count: count.max(10_000),
+    /** Relative to the report's `result_root` when present, otherwise to the report's directory. */
     result_path: z.string().max(160).nullable(),
+    /** Regrade reports only: the evaluation behind this row's scores, relative to the report's directory. */
+    regrade_path: z.string().max(160).optional(),
     evaluation: evaluationSchema.nullable(),
   })
   .strict()
   .superRefine((run, context) => {
+    if (
+      run.regrade_path !== undefined &&
+      (run.state !== 'completed' ||
+        run.regrade_path !== `runs/${run.run_id}.json`)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'A regrade path belongs to a completed run as runs/<run_id>.json.',
+      });
+    }
     const pending = run.state === 'pending';
     const completed = run.state === 'completed';
     if (
@@ -157,6 +173,7 @@ const runSchema = z
       (pending && run.result_path !== null) ||
       completed !== (run.evaluation !== null) ||
       (run.state === 'errored') !== (run.error_code !== null) ||
+      (run.state !== 'errored' && run.diagnostic !== undefined) ||
       (completed && run.result_path === null) ||
       (run.result_path !== null &&
         run.result_path !== `runs/${run.run_id}/result.json`)
@@ -222,6 +239,8 @@ const reportSchema = z
     experiment_run_id: experimentRunIdSchema,
     generated_at: z.string().datetime(),
     checkpoint_sha256: digest,
+    /** Regrade reports only: the source experiment run that `result_path` values resolve against. */
+    result_root: z.string().min(1).max(4096).optional(),
     summary: statisticsSchema,
     cases: z.array(caseSchema).min(1).max(100_000),
     runs: z.array(runSchema).min(1).max(100_000),
@@ -304,12 +323,16 @@ export function buildExperimentRunReport(input: {
   generatedAt: string;
   checkpointBody: string;
   runs: ExperimentRunReportRunV1[];
+  resultRoot?: string;
 }): ExperimentRunReportV1 {
   return parseExperimentRunReport({
     forge: FORGE_BUILD_IDENTITY,
     experiment_run_id: input.experimentRunId,
     generated_at: input.generatedAt,
     checkpoint_sha256: sha256Digest(input.checkpointBody),
+    ...(input.resultRoot === undefined
+      ? {}
+      : { result_root: input.resultRoot }),
     ...aggregateRuns(input.runs),
     runs: input.runs,
   });

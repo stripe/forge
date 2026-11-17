@@ -29,6 +29,35 @@ import * as experimentCli from '../src/experimentCli.ts';
 import * as root from '../src/index.ts';
 
 describe('experiment public entry points', () => {
+  it('keeps diagnostic minting outside the public error constructor and package exports', () => {
+    const options: ErrorOptions = { cause: new Error('host cause') };
+    const error = new root.ForgeExecutionError(
+      'agent_failed',
+      'interaction',
+      'host message',
+      options,
+    );
+    assert.equal(error.diagnostic, undefined);
+    assert.equal(error.cause, options.cause);
+    assert.equal('createExecutionErrorWithDiagnostic' in root, false);
+    assert.equal('executionDiagnostic' in root, false);
+    const diagnosticOptions: ConstructorParameters<
+      typeof root.ForgeExecutionError
+    >[3] = {
+      // @ts-expect-error Only engine code can mint a diagnostic.
+      diagnostic: { reason: 'failure', message: 'host detail' },
+    };
+    assert.equal(
+      new root.ForgeExecutionError(
+        'agent_failed',
+        'interaction',
+        'host message',
+        diagnosticOptions,
+      ).diagnostic,
+      undefined,
+    );
+  });
+
   it('exports versioned dataset case entries with their paths', () => {
     const entry: root.DatasetManifestCaseV1 = {
       id: 'first',

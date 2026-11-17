@@ -127,11 +127,11 @@ review when fixes materially change the reviewed diff.
 ### PR descriptions
 
 Write for an experienced engineer who is unfamiliar with this part of Forge.
-Start with the system context, the concrete problem, and the resulting
-behavior; define Forge-specific terms when they first matter. Explain the main
-workflow and the conditions that let a reviewer predict its outcomes: what
-starts work, when results are reused, what counts as success, and what can
-remain afterward.
+Lead with the concrete observed problem, giving the system context needed to
+understand it, then the resulting behavior; define Forge-specific terms when
+they first matter. Explain the main workflow and the conditions that let a
+reviewer predict its outcomes: what starts work, when results are reused, what
+counts as success, and what can remain afterward.
 
 Ground every behavioral claim in the current diff and the relevant
 implementation, tests, and config — not in prior PR prose or discussion. Keep
@@ -140,25 +140,49 @@ intent from observed behavior. Use plain, direct language and precise
 technical names; cut secondary topics rather than packing them into dense
 sentences. Scale detail to the change — simple PRs can be brief.
 
-Every PR description must include these sections, in this order:
+Every PR description uses these sections and subheadings, in this order. Keep
+each subheading visible, even when its content is one sentence; don't fold the
+parts into unlabeled prose under the section headings.
 
-- **Context:** the concrete problem — the input or situation, what the system
-  does today, and how that was observed (a run, a reproduction, a test) — and
-  its impact: who or what it hurts and how much. Keep measured impact separate
+```markdown
+## Context
+### Observed problem
+### Impact
+## Changes
+### Changes
+### Why this is the right fix
+## Validation
+### How to test it
+### Rollout/revert plan
+```
+
+- **Observed problem** says why the PR needs to exist: what goes wrong on
+  `main` today, or what `main` can't do, and for whom. Give the input or
+  situation, what the system does, and how that was observed (a run, a
+  reproduction, a test). Lead with this, not with how the code works.
+- **Impact:** who or what it hurts and how much. Keep measured impact separate
   from inferred impact.
 - **Changes:** the changed behavior, the main workflow, and its important
   boundaries and consequential decisions. Use a before/after or a table when it
-  helps, and a diagram when it materially improves understanding. Say why this
-  approach and not the obvious alternatives — name them and say why they lose —
-  and how the change degrades, rather than breaks, when its inputs are missing
-  or malformed, plus what it deliberately doesn't do.
+  helps, and a diagram when it materially improves understanding.
+- **Why this is the right fix:** why this approach and not the obvious
+  alternatives — name them and say why they lose — and how the change
+  degrades, rather than breaks, when its inputs are missing or malformed, plus
+  what it deliberately doesn't do.
+- **How to test it:** the exact commands a reviewer can run and what they
+  should see; which tests fail without the fix; the commands actually run and
+  their results; and any proposed check that adds signal beyond routine CI.
+  Code containing a test is not proof it passed — state when results are
+  unavailable, and label proposed checks as proposed. Note any remaining
+  validation gaps.
+- **Rollout/revert plan:** activation, compatibility with saved runs and
+  older builds, and what a revert leaves behind. Write "No rollout steps; a
+  revert has no lasting effect" when that's true.
 
-When useful, include a **Validation** section with the exact commands a
-reviewer can run and what they should see; which tests fail without the fix;
-the commands actually run and their results; and any proposed check that adds
-signal beyond routine CI. Code containing a test is not proof it passed —
-state when results are unavailable, and label proposed checks as proposed.
-Note any remaining validation gaps.
+Include only the validation and compatibility details that apply, and say
+briefly when one doesn't. Documentation-only changes need no new tests, but
+still report the documentation check (`pnpm check:docs`) and its result, or why
+it wasn't run.
 
 Before submitting, challenge the description's consequential claims. Look for
 a permitted input, state change, or failure path that would contradict each

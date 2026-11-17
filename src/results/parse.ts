@@ -177,6 +177,7 @@ const artifactDescriptor = z
 const rolePlayerError = z
   .object({
     status: z.literal('role_player_error'),
+    message: z.string().min(1).max(4096).optional(),
     error_type: z.enum(['parse_error', 'request_error']),
     attempts: z.number().int().positive(),
     explanation: z

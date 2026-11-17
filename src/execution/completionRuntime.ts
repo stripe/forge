@@ -42,7 +42,6 @@ const COMPLETION_STOP_REASONS = new Set<CompletionStopReason>([
 export interface CompletionPromptInput {
   readonly systemPrompt?: string;
   readonly messages: CompletionRequest['messages'];
-  readonly temperature?: number;
   readonly maxTokens?: number;
   readonly responseSchema?: StrictCompletionResponseSchema;
 }
@@ -104,29 +103,38 @@ export function completionBindingsForPlan(
   }
 
   return Object.freeze(
-    requested.map(({ purpose, model }) => {
-      const provider = resolveProvider(collection, model);
-      assertProvider(provider, model);
-      const metadata = completionProviderMetadataSchema
-        .optional()
-        .parse(provider.metadata);
-      const identity = Object.freeze({
-        id: provider.id,
-        version: provider.version,
-        ...(metadata === undefined ? {} : { metadata }),
-      });
-      const requirements = normalizeRequirements(
-        provider.requirements({ model, purpose }),
-      );
-      return Object.freeze({
-        purpose,
-        model: Object.freeze({ ...model }),
-        provider,
-        identity,
-        requirements,
-      });
-    }),
+    requested.map(({ purpose, model }) =>
+      completionBindingFor(collection, purpose, model),
+    ),
   );
+}
+
+/** Pure provider selection and requirement validation for one purpose and model. */
+export function completionBindingFor(
+  collection: CompletionProviderCollection,
+  purpose: CompletionPurpose,
+  model: ModelRefV1,
+): CompletionBinding {
+  const provider = resolveProvider(collection, model);
+  assertProvider(provider, model);
+  const metadata = completionProviderMetadataSchema
+    .optional()
+    .parse(provider.metadata);
+  const identity = Object.freeze({
+    id: provider.id,
+    version: provider.version,
+    ...(metadata === undefined ? {} : { metadata }),
+  });
+  const requirements = normalizeRequirements(
+    provider.requirements({ model, purpose }),
+  );
+  return Object.freeze({
+    purpose,
+    model: Object.freeze({ ...model }),
+    provider,
+    identity,
+    requirements,
+  });
 }
 
 /** Resolve provider-owned credentials and run optional preflight before Docker. */
@@ -265,13 +273,11 @@ export async function prepareCompletionRuntime(input: {
         if (signal.aborted) throw abortReason(signal);
         throw new CompletionInvocationError(
           errorCode,
-          purpose === 'judge'
-            ? boundedErrorMessage(
-                error,
-                'Completion provider call failed.',
-                secrets,
-              )
-            : 'Completion provider call failed.',
+          boundedErrorMessage(
+            error,
+            'Completion provider call failed.',
+            secrets,
+          ),
         );
       }
     },

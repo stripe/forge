@@ -515,7 +515,7 @@ describe('runConversation', () => {
   it('returns a classified role-player failure without another agent call', async () => {
     const completion = completions(
       initialResponse(['Complete the requested work'], 'Please do the work.'),
-      new Error('provider detail must not escape'),
+      new Error('gateway HTTP 400 using secret-token'),
     );
     const signal = new AbortController().signal;
     const agent = session([
@@ -527,7 +527,7 @@ describe('runConversation', () => {
       ava: new AvaRolePlayer(
         { task: 'Do the work', signal },
         completion.invoke,
-        noRetryWait,
+        { ...noRetryWait, redactionSecrets: ['secret-token'] },
       ),
       maxTurns: 3,
       signal,
@@ -539,11 +539,12 @@ describe('runConversation', () => {
       status: 'role_player_error',
       errorType: 'request_error',
       attempts: 3,
+      message: 'gateway HTTP 400 using [REDACTED]',
       explanation: 'Ava request failed after 3 attempts.',
     });
     assert.equal(result.avaAudit.decisions.at(-1)!.codingAgentInvoked, false);
     assert.deepEqual(result.avaAudit.decisions.at(-1)!.error, result.failure);
-    assert.doesNotMatch(JSON.stringify(result), /provider detail/);
+    assert.doesNotMatch(JSON.stringify(result), /secret-token/);
   });
 
   it('preserves configured stop-sentinel behavior and validates completed turns', async () => {

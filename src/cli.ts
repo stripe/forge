@@ -44,8 +44,12 @@ import {
   serializeResolvedRunPlan,
 } from './planning/index.ts';
 import { validateExperimentDataset } from './planning/planner.ts';
-import { createAnthropicCompletionProvider } from './providers/anthropic/index.ts';
+import {
+  AnthropicCompletionError,
+  createAnthropicCompletionProvider,
+} from './providers/anthropic/index.ts';
 import { createOpenAICompletionProvider } from './providers/openai/index.ts';
+import { regradeExperimentRun } from './regrade/experiment.ts';
 import { createArtifactStore } from './results/index.ts';
 import {
   createDockerRuntimeAdapter,
@@ -89,6 +93,9 @@ const HOST_CLI_OPTIONS = {
   model: { type: 'string' },
   repetition: { type: 'string' },
   'credential-env': { type: 'string', multiple: true },
+  'experiment-run': { type: 'string' },
+  'judge-provider': { type: 'string' },
+  'judge-model': { type: 'string' },
   host: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean' },
@@ -113,6 +120,7 @@ const USAGE = `Usage:
   forge plan --experiment <file> [selection options]
   forge run --experiment <file> [selection options] [run options]
   forge run --experiment <file> --resume <experiment-run-id> [run options]
+  forge regrade --experiment-run <directory> --judge-provider <id> --judge-model <id> --output <directory> [--jobs <count>]
 
 Selection options:
   --case <id>          Select an eval case
@@ -137,10 +145,21 @@ Run options:
 Validation options:
   --host                Build and inspect the selected Docker runtime image
 
+Regrade options:
+  --experiment-run <directory>  Saved experiment run (results/experiments/<id>), read only
+  --judge-provider <id>         Completion provider for the new judge, such as anthropic
+  --judge-model <id>            Judge model
+  --output <directory>          New directory for regrades and report.json, outside the source
+  --jobs <count>                Maximum simultaneous run regrades (default: 1)
+  --credential-env <reference>=<environment-name>
+                                 Bind an opaque credential reference for the judge
+
 The experiment's dataset.path locates the dataset relative to the experiment file.
 The run command executes every matching matrix entry with bounded concurrency.
 Each new invocation creates results/experiments/<experiment-run-id>/.
 The plan command requires exactly one matching matrix entry.
+The regrade command judges completed runs again from their saved artifacts; it
+re-runs no agent or Ava turn and keeps each run's original check results.
 `;
 
 export interface DefaultCliCompositionOptions {
@@ -276,7 +295,26 @@ export async function runCli(
       return 0;
     }
     if (parsed.positionals.length !== 1 || !isCommand(command)) {
-      throw new CliUsageError('Expected one command: validate, plan, or run.');
+      throw new CliUsageError(
+        'Expected one command: validate, plan, run, or regrade.',
+      );
+    }
+    if (command === 'regrade') {
+      assertAllowedOptions(parsed.values, [
+        'experiment-run',
+        'judge-provider',
+        'judge-model',
+        'output',
+        'jobs',
+        'credential-env',
+      ]);
+      return await runRegradeCommand(
+        parsed.values,
+        options,
+        engine,
+        stdout,
+        stderr,
+      );
     }
 
     const allowed: CliOptionName[] = [
@@ -990,8 +1028,80 @@ function credentialDiagnostic(
 
 function isCommand(
   value: string | undefined,
-): value is 'validate' | 'plan' | 'run' {
-  return value === 'validate' || value === 'plan' || value === 'run';
+): value is 'validate' | 'plan' | 'run' | 'regrade' {
+  return (
+    value === 'validate' ||
+    value === 'plan' ||
+    value === 'run' ||
+    value === 'regrade'
+  );
+}
+
+/** Judge a saved experiment run again into a separate output directory. */
+async function runRegradeCommand(
+  values: Readonly<
+    Record<string, string | readonly string[] | boolean | undefined>
+  >,
+  options: RunCliOptions,
+  engine: ForgeEngine,
+  stdout: (text: string) => void,
+  stderr: (text: string) => void,
+): Promise<number> {
+  const required = (name: string): string => {
+    const value = values[name];
+    if (typeof value !== 'string' || value.length === 0)
+      throw new CliUsageError(`regrade requires --${name}.`);
+    return value;
+  };
+  const cwd = path.resolve(options.cwd ?? process.cwd());
+  const experimentRun = path.resolve(cwd, required('experiment-run'));
+  const output = path.resolve(cwd, required('output'));
+  const judge = {
+    provider: required('judge-provider'),
+    model: required('judge-model'),
+  };
+  const jobsValue = values.jobs;
+  const jobs = jobsValue === undefined ? 1 : Number(jobsValue);
+  if (!Number.isSafeInteger(jobs) || jobs < 1)
+    throw new CliUsageError('--jobs must be a positive safe integer.');
+  const grants = parseCredentialEnvironmentBindings(
+    values['credential-env'] as readonly string[] | undefined,
+  );
+  if (grants.environmentNames.length > 0) {
+    throw new CliUsageError(
+      'regrade accepts only --credential-env <reference>=<environment-name> bindings.',
+    );
+  }
+  const compositionFactory =
+    options.compositionFactory ?? createDefaultCliComposition;
+  const composition = await compositionFactory({
+    // Regrading reads only committed run artifacts; no dataset is loaded.
+    datasetRoot: experimentRun,
+    resultsRoot: output,
+    ...(options.environment === undefined
+      ? {}
+      : { environment: options.environment }),
+    credentialBindings: grants.references,
+  });
+  if (composition.completionProviders === undefined)
+    throw new CliUsageError('No completion providers are available to judge.');
+  const summary = await regradeExperimentRun(
+    {
+      experimentRun,
+      judge,
+      output,
+      jobs,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      progress: (event) => stderr(`${JSON.stringify(event)}\n`),
+    },
+    {
+      completionProviders: composition.completionProviders,
+      credentialResolver: composition.credentialResolver,
+      engine,
+    },
+  );
+  stdout(`${JSON.stringify(summary)}\n`);
+  return summary.failed.length === 0 ? 0 : 1;
 }
 
 class CliUsageError extends Error {
@@ -1017,6 +1127,20 @@ function isUsageError(error: unknown): boolean {
 function errorMessage(error: unknown, running: boolean): string {
   const diagnostic = credentialDiagnostic(error, running);
   if (diagnostic !== undefined) return diagnostic;
+  const seen = new Set<unknown>();
+  let cause = error;
+  while (cause instanceof Error && !seen.has(cause)) {
+    seen.add(cause);
+    if (
+      cause instanceof AnthropicCompletionError &&
+      cause.code === 'invalid_request' &&
+      cause.message ===
+        'Claude Fable is not supported yet as the judge or Ava model.'
+    ) {
+      return cause.message;
+    }
+    cause = cause.cause;
+  }
   if (error instanceof Error && error.message) return error.message;
   return 'Unknown failure.';
 }

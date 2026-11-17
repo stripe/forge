@@ -750,7 +750,12 @@ describe('resumable CLI experiment runs', () => {
     );
     const journal = await fixture.readCheckpoint();
     assert.deepEqual(journal.entries[1]!.attempts, [
-      { run_id: 'attempt-2', state: 'errored', error_code: 'agent_failed' },
+      {
+        run_id: 'attempt-2',
+        state: 'errored',
+        error_code: 'agent_failed',
+        error_phase: 'interaction',
+      },
     ]);
     assert.equal(
       (await fs.readFile(fixture.checkpoint, 'utf8')).includes(
@@ -790,7 +795,12 @@ describe('resumable CLI experiment runs', () => {
       ['attempt-1', 'attempt-4', 'attempt-3'],
     );
     assert.deepEqual((await fixture.readCheckpoint()).entries[1]!.attempts, [
-      { run_id: 'attempt-2', state: 'errored', error_code: 'agent_failed' },
+      {
+        run_id: 'attempt-2',
+        state: 'errored',
+        error_code: 'agent_failed',
+        error_phase: 'interaction',
+      },
       { run_id: 'attempt-4', state: 'completed' },
     ]);
     assert.deepEqual(
@@ -1301,6 +1311,12 @@ describe('resumable CLI experiment runs', () => {
         run_id: 'attempt-1',
         state: 'errored',
         error_code: 'role_player_error',
+        error_phase: 'interaction',
+        diagnostic: {
+          phase: 'interaction',
+          reason: 'failure',
+          message: 'unavailable',
+        },
       },
     ]);
     const resumed = await fixture.run(['--resume', 'exp-1'], options);
