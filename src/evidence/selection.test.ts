@@ -948,9 +948,11 @@ describe('driver fallback tool results', () => {
     ]);
     const step = selected.trajectory.steps[1];
     assert.ok(step?.source === 'agent');
+    const toolArguments = step.tool_calls?.[0]?.arguments as
+      | Record<string, string>
+      | undefined;
     assert.equal(
-      (step.tool_calls?.[0]?.arguments as Record<string, string>)
-        .forge_truncated_arguments,
+      toolArguments?.forge_truncated_arguments,
       `${argumentPrefix}${argumentBody}${cut}`,
     );
     assert.equal(

@@ -25,7 +25,7 @@ it('snapshots tool results so later adapter mutation cannot rewrite evidence', (
 
 it('bounds snapshotted results without splitting an emoji', () => {
   const prefixLength = 1_048_576;
-  const original = 'x'.repeat(prefixLength - 1) + '😀' + 'x'.repeat(100);
+  const original = `${'x'.repeat(prefixLength - 1)}😀${'x'.repeat(100)}`;
   const [call] = snapshotAgentToolCalls([
     {
       name: 'Read',
