@@ -1,0 +1,287 @@
+[
+  {
+    "name": "unanimous",
+    "source_run_id": "d37f7497-15a4-45a5-957e-fc6226b5b03e",
+    "source_criterion_index": 0,
+    "expected": {
+      "criterion": "MUST: Shows Starter at $9/month, Pro at $29/month, and Enterprise at $99/month with a Start Free Trial action for each.",
+      "requirement_level": "MUST",
+      "passed": true,
+      "explanation": "lib/billing/plans.ts defines Starter at $9, Pro at $29, and Enterprise at $99; app/page.tsx renders each with '/ month' and a 'Start Free Trial' link.",
+      "decision": {
+        "type": "choice",
+        "choice": "met",
+        "probabilities": {
+          "met": 1,
+          "not_met": 0,
+          "insufficient_evidence": 0
+        },
+        "confidence": 1,
+        "candidates": [
+          {
+            "reading": "Evaluate the final pricing page and its plan data.",
+            "rationale": "lib/billing/plans.ts defines Starter at $9, Pro at $29, and Enterprise at $99; app/page.tsx renders each with '/ month' and a 'Start Free Trial' link.",
+            "label": "met",
+            "probability": 0.6
+          },
+          {
+            "reading": "Require a distinct trial action for every displayed tier.",
+            "rationale": "The pricing page maps all three plans into cards, each containing a 'Start Free Trial' action linking to its own /subscribe/[plan] route.",
+            "label": "met",
+            "probability": 0.18
+          },
+          {
+            "reading": "Check that the advertised amounts explicitly represent monthly prices.",
+            "rationale": "The plan values are 9, 29, and 99, and each card displays a dollar sign and '/ month'. Each also includes the required trial action.",
+            "label": "met",
+            "probability": 0.12
+          },
+          {
+            "reading": "Assess implementation evidence rather than the assistant's completion claims.",
+            "rationale": "The supplied workspace directly contains the three correctly priced tiers and the shared card template that renders a 'Start Free Trial' link for each.",
+            "label": "met",
+            "probability": 0.07
+          },
+          {
+            "reading": "Distinguish the pricing-page requirement from end-to-end billing readiness.",
+            "rationale": "Although billing ownership remains a fail-closed stub, the requested pricing display and trial actions are implemented for all three tiers; that stub does not defeat this criterion.",
+            "label": "met",
+            "probability": 0.03
+          }
+        ],
+        "thresholded_outcome": "met",
+        "thresholds": {
+          "minimum_probability": 0.8
+        }
+      }
+    }
+  },
+  {
+    "name": "all_options",
+    "source_run_id": "d37f7497-15a4-45a5-957e-fc6226b5b03e",
+    "source_criterion_index": 1,
+    "expected": {
+      "criterion": "MUST: Maps each selectable tier to a server-side allowlisted recurring Price.",
+      "requirement_level": "MUST",
+      "passed": true,
+      "explanation": "lib/billing/plans.ts allowlists Starter, Pro, and Enterprise and maps each to its own server-side STRIPE_PRICE_* configuration. Billing endpoints validate planId and resolve the Price internally rather than accepting arbitrary client Price IDs.",
+      "decision": {
+        "type": "choice",
+        "choice": "met",
+        "probabilities": {
+          "met": 0.97,
+          "not_met": 0.02,
+          "insufficient_evidence": 0.01
+        },
+        "confidence": 0.97,
+        "candidates": [
+          {
+            "reading": "Server-controlled tier-to-Price mapping satisfies the criterion.",
+            "rationale": "lib/billing/plans.ts allowlists Starter, Pro, and Enterprise and maps each to its own server-side STRIPE_PRICE_* configuration. Billing endpoints validate planId and resolve the Price internally rather than accepting arbitrary client Price IDs.",
+            "label": "met",
+            "probability": 0.65
+          },
+          {
+            "reading": "The mapping also explicitly establishes recurring pricing.",
+            "rationale": "Each allowlisted tier has a configured Price ID, and assertTrialOfferConfiguration retrieves its transition Price and verifies a monthly recurring interval and matching tier amount before signup.",
+            "label": "met",
+            "probability": 0.24
+          },
+          {
+            "reading": "Trial Offer indirection still meets the Price-mapping requirement.",
+            "rationale": "Although signup attaches a Trial Offer rather than passing the regular Price directly, the server verifies that the offer transitions to the selected tier’s allowlisted monthly Price. Plan changes likewise use getStripePriceId(planId).",
+            "label": "met",
+            "probability": 0.08
+          },
+          {
+            "reading": "A stricter interpretation requires recurring-Price validation on every plan-change path.",
+            "rationale": "The post-trial update path resolves an allowlisted environment-configured Price but does not retrieve it to verify recurrence before switching. Under an every-use validation interpretation, the recurring guarantee is incomplete.",
+            "label": "not_met",
+            "probability": 0.02
+          },
+          {
+            "reading": "Actual configured Stripe Price objects must be observable to establish recurrence.",
+            "rationale": "The workspace contains placeholder Price IDs and no live Stripe configuration results, so actual deployed recurring Prices cannot be confirmed under this deployment-focused interpretation.",
+            "label": "insufficient_evidence",
+            "probability": 0.01
+          }
+        ],
+        "thresholded_outcome": "met",
+        "thresholds": {
+          "minimum_probability": 0.8
+        }
+      }
+    }
+  },
+  {
+    "name": "missing",
+    "source_run_id": "d37f7497-15a4-45a5-957e-fc6226b5b03e",
+    "source_criterion_index": 17,
+    "expected": {
+      "criterion": "MUST NOT grant post-trial paid access unless current Stripe subscription and invoice state authorizes it.",
+      "requirement_level": "MUST",
+      "passed": false,
+      "explanation": "Webhooks only log events, and no entitlement or paid-access gate checks current subscription and invoice state. The evidence shows neither an unauthorized grant nor enforcement of the required authorization rule.",
+      "decision": {
+        "type": "choice",
+        "choice": "insufficient_evidence",
+        "probabilities": {
+          "met": 0.1,
+          "not_met": 0.32,
+          "insufficient_evidence": 0.58
+        },
+        "confidence": 0.58,
+        "candidates": [
+          {
+            "reading": "Access authorization is not implemented in the supplied billing starter.",
+            "rationale": "Webhooks only log events, and no entitlement or paid-access gate checks current subscription and invoice state. The evidence shows neither an unauthorized grant nor enforcement of the required authorization rule.",
+            "label": "insufficient_evidence",
+            "probability": 0.48
+          },
+          {
+            "reading": "The criterion requires an explicit subscription-and-invoice authorization safeguard.",
+            "rationale": "The implementation delegates entitlement handling to future integration work and does not handle invoice.paid or implement invoice-aware access authorization. Under this strict completion reading, the required safeguard is missing.",
+            "label": "not_met",
+            "probability": 0.27
+          },
+          {
+            "reading": "The current scaffold must be evaluated for whether it actually grants unauthorized access.",
+            "rationale": "Ownership methods fail closed, webhook handlers only log, and the README explicitly warns against granting access from the Elements return page. On this narrow reading, the supplied implementation grants no post-trial paid access.",
+            "label": "met",
+            "probability": 0.1
+          },
+          {
+            "reading": "Billing mutations do not establish downstream access behavior.",
+            "rationale": "Plan changes retain pending_if_incomplete, but neither that setting nor subscription metadata proves how PixelPro authorizes access after payment failure. The relevant downstream authorization implementation is absent.",
+            "label": "insufficient_evidence",
+            "probability": 0.1
+          },
+          {
+            "reading": "General webhook guidance is insufficient to satisfy the explicit authorization requirement.",
+            "rationale": "The README says subscription status should drive access, but it never requires current invoice authorization, and payment-failure handling only logs. This reading treats the incomplete authorization design as failure to meet the criterion.",
+            "label": "not_met",
+            "probability": 0.05
+          }
+        ],
+        "thresholded_outcome": "insufficient_evidence",
+        "thresholds": {
+          "minimum_probability": 0.8
+        }
+      }
+    }
+  },
+  {
+    "name": "weak_met",
+    "source_run_id": "be84a35d-76ba-4f1c-9c85-98cb6f8dcd5c",
+    "source_criterion_index": 0,
+    "expected": {
+      "criterion": "MUST: Validates that the requested cancel_at timestamp is in the future and belongs to the authorized tenant's subscription.",
+      "requirement_level": "MUST",
+      "passed": true,
+      "explanation": "Billing.preview rejects cancelAt values at or before the current time, and subscription() checks that the subscription's customer matches customerId. Billing endpoints require bearer authentication, with the trusted application responsible for deriving customerId from its authenticated tenant mapping.",
+      "decision": {
+        "type": "choice",
+        "choice": "met",
+        "probabilities": {
+          "met": 0.7899999999999999,
+          "not_met": 0.18000000000000002,
+          "insufficient_evidence": 0.03
+        },
+        "confidence": 0.7899999999999999,
+        "candidates": [
+          {
+            "reading": "Evaluate validation within the documented trusted internal API boundary.",
+            "rationale": "Billing.preview rejects cancelAt values at or before the current time, and subscription() checks that the subscription's customer matches customerId. Billing endpoints require bearer authentication, with the trusted application responsible for deriving customerId from its authenticated tenant mapping.",
+            "label": "met",
+            "probability": 0.7
+          },
+          {
+            "reading": "Require tenant authorization to be enforced entirely by this service.",
+            "rationale": "Future-timestamp validation is explicit, but any holder of the shared internal API key can supply another customer's IDs. The ownership comparison does not independently bind customerId to the caller's tenant identity.",
+            "label": "not_met",
+            "probability": 0.17
+          },
+          {
+            "reading": "Evaluate the implemented preview-to-confirmation workflow.",
+            "rationale": "The preview validates both future time and subscription ownership, then signs the customer, subscription, and cancellation timestamp into a quote. Scheduling verifies that binding and rechecks ownership and cancellation timing before updating Stripe.",
+            "label": "met",
+            "probability": 0.09
+          },
+          {
+            "reading": "Require evidence of the external authenticated tenant mapping.",
+            "rationale": "The code establishes future-time validation and customer/subscription matching, but the documented upstream identity mapping is outside the supplied implementation. Its enforcement cannot be verified from this evidence.",
+            "label": "insufficient_evidence",
+            "probability": 0.03
+          },
+          {
+            "reading": "Treat deployment instructions as insufficient to satisfy tenant authorization.",
+            "rationale": "The README delegates deriving an authorized customerId to another application rather than implementing that authorization. Under this strict reading, customer ownership matching alone does not satisfy the authorized-tenant requirement.",
+            "label": "not_met",
+            "probability": 0.01
+          }
+        ],
+        "thresholded_outcome": "insufficient_evidence",
+        "thresholds": {
+          "minimum_probability": 0.8
+        }
+      }
+    }
+  },
+  {
+    "name": "weak_not_met",
+    "source_run_id": "db52e61c-742e-4443-9c23-400552520f1b",
+    "source_criterion_index": 1,
+    "expected": {
+      "criterion": "MUST: Authenticates the caller and verifies ownership of the school Customer and Subscription Schedule before reads or updates.",
+      "requirement_level": "MUST",
+      "passed": false,
+      "explanation": "Authentication is delegated to an unimplemented resolveSchoolId adapter. Although ownedContract checks the local contract’s school_id, the code does not verify the retrieved Stripe schedule’s Customer against the school’s Customer mapping before reads or updates.",
+      "decision": {
+        "type": "choice",
+        "choice": "not_met",
+        "probabilities": {
+          "met": 0.14,
+          "not_met": 0.7999999999999999,
+          "insufficient_evidence": 0.06
+        },
+        "confidence": 0.7999999999999999,
+        "candidates": [
+          {
+            "reading": "Strict implementation-level reading of authentication and ownership.",
+            "rationale": "Authentication is delegated to an unimplemented resolveSchoolId adapter. Although ownedContract checks the local contract’s school_id, the code does not verify the retrieved Stripe schedule’s Customer against the school’s Customer mapping before reads or updates.",
+            "label": "not_met",
+            "probability": 0.57
+          },
+          {
+            "reading": "Customer ownership must be checked independently of local contract ownership.",
+            "rationale": "The endpoints enforce ownership of the local contract record, but never compare schedule.customer with store.customer(schoolId). Even accepting the authentication adapter as sufficient, the explicit Customer-ownership requirement is not fulfilled.",
+            "label": "not_met",
+            "probability": 0.23
+          },
+          {
+            "reading": "An injected authentication adapter and trusted database mappings satisfy the criterion.",
+            "rationale": "Every billing endpoint calls resolveSchoolId, documented as authenticating a billing administrator, and schedule reads or updates follow ownedContract’s tenant check. Customer IDs originate from the trusted school mapping rather than client input.",
+            "label": "met",
+            "probability": 0.11
+          },
+          {
+            "reading": "The external authentication integration determines whether the criterion is fulfilled.",
+            "rationale": "The supplied module exposes an authentication hook and tenant checks, but the actual authenticateBillingAdmin implementation and deployment wiring are absent. This leaves caller authentication unverified.",
+            "label": "insufficient_evidence",
+            "probability": 0.06
+          },
+          {
+            "reading": "Explicit integration instructions count as satisfying authentication in an existing Express application.",
+            "rationale": "The assistant explicitly requires an authentication-and-authorization adapter and invokes it before billing operations; local school-to-Customer and contract-to-schedule mappings provide the ownership chain. Under this integration-oriented reading, the criterion is met.",
+            "label": "met",
+            "probability": 0.03
+          }
+        ],
+        "thresholded_outcome": "insufficient_evidence",
+        "thresholds": {
+          "minimum_probability": 0.8
+        }
+      }
+    }
+  }
+]
