@@ -18,6 +18,7 @@ import {
   type PreparedCompletionRuntime,
   prepareCompletionRuntime,
 } from '../execution/completionRuntime.ts';
+import { assertJudgePromptWillRemainUnchanged } from '../execution/judgePrompt.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import type { ModelRefV1, ResolvedRunPlanV1 } from '../model/types.ts';
 import { parseEvaluationResult, parseJudgeEvidence } from '../results/parse.ts';
@@ -154,6 +155,9 @@ export async function regradeCompletedRun(
         .content,
     {
       redactionSecrets: completions.secrets,
+      // The saved evidence must reach the new judge unchanged, as in execution.
+      validateRequest: (request) =>
+        assertJudgePromptWillRemainUnchanged(request, completions.secrets),
       ...(input.waitBeforeJudgeRetry === undefined
         ? {}
         : { waitBeforeRetry: input.waitBeforeJudgeRetry }),

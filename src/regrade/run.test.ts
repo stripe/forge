@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { afterEach, describe, it } from 'vitest';
+import { credentialReference } from '../contracts/credentials.ts';
 import { verifyCompletedRun } from '../results/index.ts';
 import {
   createScriptedCompletionProvider,
@@ -157,5 +158,33 @@ describe('regradeCompletedRun', () => {
       ),
       /Artifact (does not match its descriptor|is unsafe or exceeds its declared size)/,
     );
+  });
+
+  it('rejects a judge credential that would rewrite the saved evidence before any call', async () => {
+    const source = await fixture();
+    // The saved transcript contains "Forge", so redacting it would change the prompt the digests describe.
+    const scripted = createScriptedCompletionProvider({
+      id: 'anthropic',
+      responses: [ORIGINAL_JUDGMENT],
+      requirements: {
+        credentials: { token: { reference: credentialReference('judge.key') } },
+      },
+    });
+    await assert.rejects(
+      regradeCompletedRun(
+        {
+          location: source.runLocation,
+          judge: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+        },
+        {
+          completionProviders: new Map([['anthropic', scripted.provider]]),
+          credentialResolver: createStaticCredentialResolver({
+            'judge.key': 'Forge',
+          }),
+        },
+      ),
+      /without changing its audited evidence/,
+    );
+    assert.equal(scripted.calls.length, 0);
   });
 });
