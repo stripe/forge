@@ -383,6 +383,32 @@ describe('collectJudgeWorkspaceEvidence', () => {
     );
   });
 
+  it('records the entry limit once when a typed error carries more entries than requested', async () => {
+    const test = fixture({ bodies: { 'a.txt': 'a', 'b.txt': 'b' } });
+    const workspace = {
+      ...test.workspace,
+      listFiles: async () => {
+        throw new WorkspaceEntryLimitError(2, [
+          file('z.txt', 1),
+          file('b.txt', 1),
+          file('a.txt', 1),
+        ]);
+      },
+    };
+    const collected = await collectJudgeWorkspaceEvidence(workspace, {
+      maxEntries: 2,
+    });
+    assert.deepEqual(
+      collected.evidence.warnings.map(({ code }) => code),
+      ['workspace_entry_limit_reached'],
+    );
+    assert.deepEqual(
+      collected.evidence.entries.map(({ path }) => path),
+      ['a.txt', 'b.txt'],
+    );
+    assert.equal(collected.evidence.truncated, true);
+  });
+
   it('stops in lexical order before evidence beyond the depth bound', async () => {
     const test = fixture({
       entries: [file('a.txt', 1), file('level/too/deep.txt', 4)],

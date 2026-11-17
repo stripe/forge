@@ -197,6 +197,7 @@ export async function collectJudgeWorkspaceEvidence(
 
   options.signal?.throwIfAborted();
   let listed: readonly WorkspaceEntry[];
+  let entryLimitRecorded = false;
   try {
     listed = await withinDeadline(
       workspace.listFiles({
@@ -214,6 +215,7 @@ export async function collectJudgeWorkspaceEvidence(
     if (error instanceof WorkspaceEntryLimitError) {
       listed = error.entries;
       stop(entryLimit(Math.min(error.maxEntries, limits.maxEntries)));
+      entryLimitRecorded = true;
     } else {
       if (error instanceof CollectionStop) {
         stop(error);
@@ -244,7 +246,7 @@ export async function collectJudgeWorkspaceEvidence(
     compareCodeUnits(left.path, right.path),
   );
   if (ordered.length > limits.maxEntries) {
-    stop(entryLimit(limits.maxEntries));
+    if (!entryLimitRecorded) stop(entryLimit(limits.maxEntries));
     ordered.length = limits.maxEntries;
   }
   const symlinkRoots = ordered
