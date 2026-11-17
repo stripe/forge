@@ -69,13 +69,6 @@ export class InvalidDecisionResponseError extends Error {
   }
 }
 
-/** A dispatch check failed; the request must not be retried. */
-export class DecisionDispatchError extends Error {
-  constructor(readonly failure: unknown) {
-    super('Decision request validation failed.');
-  }
-}
-
 /** A saved distribution sums to 1, names a maximal choice, and is in range. */
 export function choiceDistributionIsValid(
   answer: Pick<ChoiceAnswer, 'choice' | 'probabilities' | 'confidence'>,
