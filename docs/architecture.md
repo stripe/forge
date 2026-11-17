@@ -1207,10 +1207,11 @@ Fallback redacts resolved secrets from assistant text, arguments, and results
 immediately before clipping each, after normalizing arguments to JSON, so inputs
 that are not JSON are marked omitted rather than failing the run. Its
 `redaction_count` is the number of replacements made in the values fallback
-considered before clipping, plus those made in tool-result text at the
-interaction boundary. It therefore includes secrets in text a later clip removed,
-and excludes calls the call budget dropped; it can exceed the redaction markers
-that remain in `trajectory.json`.
+considered before clipping, plus those made in every tool result at the
+interaction boundary. It therefore includes secrets in text a later clip
+removed and in results of calls the call budget dropped. Arguments of dropped
+calls are never considered. The count can exceed the redaction markers that
+remain in `trajectory.json`.
 Assistant, argument, result, and call-count truncation has a visible marker and
 adds a `value_omitted` warning. Scoring consumes this exact bounded trajectory;
 judging receives its declared root-behavior projection subject to the

@@ -469,3 +469,58 @@ it('caps the result text retained across one run and marks the cut results', asy
     await fs.rm(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+it('counts result redactions for calls the fallback call budget drops, but not their arguments', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-count-'));
+  try {
+    const secret = 'synthetic-private-token';
+    const agent = createScriptedAgentAdapter({
+      requirements: {
+        executables: [],
+        stateDirectories: [],
+        environment: {
+          credentials: {
+            TEST_TOKEN: { reference: credentialReference('test.key') },
+          },
+        },
+      },
+      turns: [
+        {
+          text: 'Done.',
+          sessionId: 'selected',
+          toolCalls: Array.from({ length: 300 }, (_, index) => ({
+            id: `call-${index}`,
+            name: 'Read',
+            input: { value: index === 299 ? secret : 'plain' },
+            result: {
+              content: index === 0 || index === 299 ? secret : 'plain',
+            },
+          })),
+        },
+      ],
+    });
+    const completed = await executeEval({
+      runId: 'dropped-call-count',
+      plan: createTestResolvedRunPlan(),
+      composition: {
+        runtime: createFakeRuntimeAdapter().adapter,
+        agents: new Map([[agent.adapter.id, agent.adapter]]),
+        credentialResolver: createStaticCredentialResolver({
+          'test.key': secret,
+        }),
+        inputProvider: createMemoryRunInputProvider(),
+        artifactStore: createArtifactStore({ root }),
+      },
+    });
+    const trajectory = await fs.readFile(
+      path.join(completed.location, 'trajectory.json'),
+      'utf8',
+    );
+    assert.equal(trajectory.split('[REDACTED]').length - 1, 1);
+    // Both results are redacted at the turn boundary before the call budget
+    // drops one; the dropped call's argument is never considered.
+    assert.equal(completed.result.evidence.redaction_count, 2);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
