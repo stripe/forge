@@ -68,14 +68,30 @@ describe('regradeExperimentRun', () => {
       report.runs[0]!.result_path,
       'runs/regrade-source/result.json',
     );
+    // regrade_path (under the report's directory) holds the evaluation behind the row's score;
+    // result_path (under result_root, the source run) keeps the original execution for provenance.
+    assert.equal(report.runs[0]!.regrade_path, 'runs/regrade-source.json');
+    assert.equal(
+      report.result_root,
+      await fs.realpath(source.experimentLocation),
+    );
     const saved = JSON.parse(
       await fs.readFile(
-        path.join(output, 'runs', 'regrade-source.json'),
+        path.join(output, report.runs[0]!.regrade_path!),
         'utf8',
       ),
     );
     assert.deepEqual(saved.judge, judge);
+    assert.equal(saved.evaluation.score, report.runs[0]!.evaluation!.score);
     assert.equal(saved.source.original_evaluation.score, 1);
+    const original = JSON.parse(
+      await fs.readFile(
+        path.join(report.result_root!, report.runs[0]!.result_path!),
+        'utf8',
+      ),
+    );
+    assert.equal(original.evaluation.score, 1);
+    await assert.rejects(fs.access(path.join(output, '.regrade.lock')));
 
     // A rerun with the same judge reuses the saved regrade without judge calls.
     const second = dependencies([]);
@@ -128,6 +144,59 @@ describe('regradeExperimentRun', () => {
       JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
     );
     assert.equal(report.runs[0]!.state, 'pending');
+  });
+
+  it('refuses a second regrade writing to the same output at the same time', async () => {
+    const root = await temporaryRoot('forge-regrade-exp-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const output = path.join(root, 'regrade');
+    const judge = { provider: 'anthropic', model: 'claude-opus-4-6' };
+    const a = dependencies([failingJudgment]);
+    const b = dependencies([ORIGINAL_JUDGMENT]);
+    const results = await Promise.allSettled([
+      regradeExperimentRun(
+        { experimentRun: source.experimentLocation, judge, output },
+        a.dependencies,
+      ),
+      regradeExperimentRun(
+        {
+          experimentRun: source.experimentLocation,
+          judge: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+          output,
+        },
+        b.dependencies,
+      ),
+    ]);
+    const refused = results.filter((r) => r.status === 'rejected');
+    assert.equal(refused.length, 1);
+    assert.match(
+      String((refused[0] as PromiseRejectedResult).reason),
+      /Another regrade is writing to/,
+    );
+    // Every output file describes the one invocation that held the lock.
+    const winner = (
+      results.find((r) => r.status === 'fulfilled') as PromiseFulfilledResult<
+        Awaited<ReturnType<typeof regradeExperimentRun>>
+      >
+    ).value;
+    const saved = JSON.parse(
+      await fs.readFile(
+        path.join(output, 'runs', 'regrade-source.json'),
+        'utf8',
+      ),
+    );
+    const summary = JSON.parse(
+      await fs.readFile(path.join(output, 'regrade.json'), 'utf8'),
+    );
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
+    );
+    assert.deepEqual(saved.judge, winner.judge);
+    assert.deepEqual(summary.judge, winner.judge);
+    assert.equal(report.runs[0]!.evaluation!.score, saved.evaluation.score);
+    assert.equal(a.scripted.calls.length + b.scripted.calls.length, 1);
+    await assert.rejects(fs.access(path.join(output, '.regrade.lock')));
   });
 
   it('rejects an output inside the source experiment run before any work', async () => {

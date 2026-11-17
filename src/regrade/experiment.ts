@@ -25,7 +25,7 @@ export const REGRADE_SUMMARY_FORMAT = 'forge-regrade-experiment-v1' as const;
 export interface RegradeExperimentSummaryV1 {
   readonly format: typeof REGRADE_SUMMARY_FORMAT;
   readonly experiment_run_id: string;
-  /** Source experiment run; report rows' `result_path` values are relative to it. */
+  /** Source experiment run; the report records it as `result_root`, which its rows' `result_path` values resolve against. */
   readonly source_location: string;
   readonly output_location: string;
   readonly judge: ModelRefV1;
@@ -56,7 +56,12 @@ type RegradeOutcome =
  * source experiment run is only read. Each regrade is written to
  * `<output>/runs/<run_id>.json`, then `<output>/report.json` aggregates the
  * regraded evaluations with the source checkpoint's selections, and
- * `<output>/regrade.json` summarizes the invocation.
+ * `<output>/regrade.json` summarizes the invocation. Report rows keep
+ * `result_path` (the original execution, under the report's `result_root`)
+ * and add `regrade_path` (the evaluation behind their scores, under the
+ * report's directory). One invocation at a time may write an output: an
+ * exclusive lock is held from the first read of saved regrades until
+ * `regrade.json` is written.
  */
 export async function regradeExperimentRun(
   input: {
@@ -102,168 +107,203 @@ export async function regradeExperimentRun(
     JSON.parse(checkpointBody) as { entries: { attempts: unknown[] }[] }
   ).entries.map((entry) => entry.attempts.length);
   await fs.mkdir(path.join(output, 'runs'), { recursive: true });
+  const lock = await acquireOutputLock(output);
+  try {
+    return await regradeLocked();
+  } finally {
+    await lock.release();
+  }
 
-  const completedIndexes = inspection.outcomes.flatMap((outcome, index) =>
-    outcome.state === 'completed' && outcome.artifact !== null ? [index] : [],
-  );
-  const outcomes = new Map<number, RegradeOutcome>();
-  let next = 0;
-  const worker = async () => {
-    for (;;) {
-      signal.throwIfAborted();
-      const index = completedIndexes[next++];
-      if (index === undefined) return;
-      const outcome = inspection.outcomes[index]!;
-      const result = await regradeOne(
-        outcome.run_id!,
-        outcome.artifact!.location,
-      );
-      outcomes.set(index, result);
-      input.progress?.({ run_id: outcome.run_id!, state: result.kind });
-    }
-  };
-  const regradeOne = async (
-    runId: string,
-    location: string,
-  ): Promise<RegradeOutcome> => {
-    const file = path.join(output, 'runs', `${runId}.json`);
-    try {
-      const resultSha256 = sha256Digest(
-        await fs.readFile(path.join(location, 'result.json')),
-      );
-      const existing = await readExistingRegrade(file);
-      if (existing !== undefined) {
-        if (
-          existing.run_id !== runId ||
-          existing.judge.provider !== input.judge.provider ||
-          existing.judge.model !== input.judge.model ||
-          existing.source.result_sha256 !== resultSha256
-        )
-          throw new Error(
-            'An existing regrade in the output uses a different judge or result.',
-          );
-        return { kind: 'reused', regrade: existing };
+  async function regradeLocked(): Promise<RegradeExperimentSummaryV1> {
+    const completedIndexes = inspection.outcomes.flatMap((outcome, index) =>
+      outcome.state === 'completed' && outcome.artifact !== null ? [index] : [],
+    );
+    const outcomes = new Map<number, RegradeOutcome>();
+    let next = 0;
+    const worker = async () => {
+      for (;;) {
+        signal.throwIfAborted();
+        const index = completedIndexes[next++];
+        if (index === undefined) return;
+        const outcome = inspection.outcomes[index]!;
+        const result = await regradeOne(
+          outcome.run_id!,
+          outcome.artifact!.location,
+        );
+        outcomes.set(index, result);
+        input.progress?.({ run_id: outcome.run_id!, state: result.kind });
       }
-      const regrade = await regradeCompletedRun(
-        {
-          location,
-          judge: input.judge,
-          signal,
-          now,
-          ...(input.waitBeforeJudgeRetry === undefined
-            ? {}
-            : { waitBeforeJudgeRetry: input.waitBeforeJudgeRetry }),
-        },
-        { ...dependencies, engine },
-      );
-      if (regrade === undefined) return { kind: 'not_judged' };
-      await writeAtomic(file, `${JSON.stringify(regrade, null, 2)}\n`);
-      return { kind: 'regraded', regrade };
-    } catch (error) {
-      if (signal.aborted) throw error;
-      return {
-        kind: 'failed',
-        message: (error instanceof Error ? error.message : String(error)).slice(
-          0,
-          500,
-        ),
-      };
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(jobs, completedIndexes.length) }, worker),
-  );
-
-  const runs: ExperimentRunReportRunV1[] = [];
-  for (const [index, outcome] of inspection.outcomes.entries()) {
-    const base = {
-      selection_index: index,
-      selection: outcome.selection,
-      attempt_count: attemptCounts[index] ?? 0,
     };
-    const regraded = outcomes.get(index);
-    if (outcome.state === 'pending' || regraded?.kind === 'failed') {
-      runs.push({
-        ...base,
-        attempt_count: 0,
-        run_id: null,
-        state: 'pending',
-        error_code: null,
-        result_path: null,
-        evaluation: null,
-      });
-      continue;
-    }
-    const resultPath =
-      outcome.artifact === null ? null : `runs/${outcome.run_id}/result.json`;
-    if (outcome.state === 'errored') {
+    const regradeOne = async (
+      runId: string,
+      location: string,
+    ): Promise<RegradeOutcome> => {
+      const file = path.join(output, 'runs', `${runId}.json`);
+      try {
+        const resultSha256 = sha256Digest(
+          await fs.readFile(path.join(location, 'result.json')),
+        );
+        const existing = await readExistingRegrade(file);
+        if (existing !== undefined) {
+          if (
+            existing.run_id !== runId ||
+            existing.judge.provider !== input.judge.provider ||
+            existing.judge.model !== input.judge.model ||
+            existing.source.result_sha256 !== resultSha256
+          )
+            throw new Error(
+              'An existing regrade in the output uses a different judge or result.',
+            );
+          return { kind: 'reused', regrade: existing };
+        }
+        const regrade = await regradeCompletedRun(
+          {
+            location,
+            judge: input.judge,
+            signal,
+            now,
+            ...(input.waitBeforeJudgeRetry === undefined
+              ? {}
+              : { waitBeforeJudgeRetry: input.waitBeforeJudgeRetry }),
+          },
+          { ...dependencies, engine },
+        );
+        if (regrade === undefined) return { kind: 'not_judged' };
+        await writeAtomic(file, `${JSON.stringify(regrade, null, 2)}\n`);
+        return { kind: 'regraded', regrade };
+      } catch (error) {
+        if (signal.aborted) throw error;
+        return {
+          kind: 'failed',
+          message: (error instanceof Error
+            ? error.message
+            : String(error)
+          ).slice(0, 500),
+        };
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(jobs, completedIndexes.length) }, worker),
+    );
+
+    const runs: ExperimentRunReportRunV1[] = [];
+    for (const [index, outcome] of inspection.outcomes.entries()) {
+      const base = {
+        selection_index: index,
+        selection: outcome.selection,
+        attempt_count: attemptCounts[index] ?? 0,
+      };
+      const regraded = outcomes.get(index);
+      if (outcome.state === 'pending' || regraded?.kind === 'failed') {
+        runs.push({
+          ...base,
+          attempt_count: 0,
+          run_id: null,
+          state: 'pending',
+          error_code: null,
+          result_path: null,
+          evaluation: null,
+        });
+        continue;
+      }
+      const resultPath =
+        outcome.artifact === null ? null : `runs/${outcome.run_id}/result.json`;
+      if (outcome.state === 'errored') {
+        runs.push({
+          ...base,
+          run_id: outcome.run_id,
+          state: 'errored',
+          error_code: outcome.error_code,
+          result_path: resultPath,
+          evaluation: null,
+        });
+        continue;
+      }
+      const evaluation =
+        regraded?.kind === 'regraded' || regraded?.kind === 'reused'
+          ? regraded.regrade.evaluation
+          : (await engine.verifyCompletedRun(outcome.artifact!.location)).result
+              .evaluation;
       runs.push({
         ...base,
         run_id: outcome.run_id,
-        state: 'errored',
-        error_code: outcome.error_code,
+        state: 'completed',
+        error_code: null,
         result_path: resultPath,
-        evaluation: null,
+        ...(regraded?.kind === 'regraded' || regraded?.kind === 'reused'
+          ? { regrade_path: `runs/${outcome.run_id}.json` }
+          : {}),
+        evaluation: summarizeReportEvaluation(evaluation),
       });
-      continue;
     }
-    const evaluation =
-      regraded?.kind === 'regraded' || regraded?.kind === 'reused'
-        ? regraded.regrade.evaluation
-        : (await engine.verifyCompletedRun(outcome.artifact!.location)).result
-            .evaluation;
-    runs.push({
-      ...base,
-      run_id: outcome.run_id,
-      state: 'completed',
-      error_code: null,
-      result_path: resultPath,
-      evaluation: summarizeReportEvaluation(evaluation),
+    const generatedAt = now().toISOString();
+    const report = buildExperimentRunReport({
+      experimentRunId: inspection.experiment_run_id,
+      generatedAt,
+      checkpointBody,
+      runs,
+      resultRoot: source,
     });
-  }
-  const generatedAt = now().toISOString();
-  const report = buildExperimentRunReport({
-    experimentRunId: inspection.experiment_run_id,
-    generatedAt,
-    checkpointBody,
-    runs,
-  });
-  const reportPath = path.join(output, 'report.json');
-  await writeAtomic(reportPath, serializeExperimentRunReport(report));
+    const reportPath = path.join(output, 'report.json');
+    await writeAtomic(reportPath, serializeExperimentRunReport(report));
 
-  const count = (kind: RegradeOutcome['kind']) =>
-    [...outcomes.values()].filter((outcome) => outcome.kind === kind).length;
-  const summary: RegradeExperimentSummaryV1 = Object.freeze({
-    format: REGRADE_SUMMARY_FORMAT,
-    experiment_run_id: inspection.experiment_run_id,
-    source_location: source,
-    output_location: output,
-    judge: Object.freeze({ ...input.judge }),
-    regraded: count('regraded'),
-    reused: count('reused'),
-    not_judged: count('not_judged'),
-    not_completed: inspection.outcomes.length - completedIndexes.length,
-    failed: Object.freeze(
-      [...outcomes.entries()].flatMap(([index, outcome]) =>
-        outcome.kind === 'failed'
-          ? [
-              {
-                run_id: inspection.outcomes[index]!.run_id!,
-                message: outcome.message,
-              },
-            ]
-          : [],
+    const count = (kind: RegradeOutcome['kind']) =>
+      [...outcomes.values()].filter((outcome) => outcome.kind === kind).length;
+    const summary: RegradeExperimentSummaryV1 = Object.freeze({
+      format: REGRADE_SUMMARY_FORMAT,
+      experiment_run_id: inspection.experiment_run_id,
+      source_location: source,
+      output_location: output,
+      judge: Object.freeze({ ...input.judge }),
+      regraded: count('regraded'),
+      reused: count('reused'),
+      not_judged: count('not_judged'),
+      not_completed: inspection.outcomes.length - completedIndexes.length,
+      failed: Object.freeze(
+        [...outcomes.entries()].flatMap(([index, outcome]) =>
+          outcome.kind === 'failed'
+            ? [
+                {
+                  run_id: inspection.outcomes[index]!.run_id!,
+                  message: outcome.message,
+                },
+              ]
+            : [],
+        ),
       ),
-    ),
-    report: reportPath,
-    generated_at: generatedAt,
-    forge: FORGE_BUILD_IDENTITY,
-  });
-  await writeAtomic(
-    path.join(output, 'regrade.json'),
-    `${JSON.stringify(summary, null, 2)}\n`,
-  );
-  return summary;
+      report: reportPath,
+      generated_at: generatedAt,
+      forge: FORGE_BUILD_IDENTITY,
+    });
+    await writeAtomic(
+      path.join(output, 'regrade.json'),
+      `${JSON.stringify(summary, null, 2)}\n`,
+    );
+    return summary;
+  }
+}
+
+const OUTPUT_LOCK = '.regrade.lock';
+
+/** Exclusively claim a regrade output directory; a second writer fails instead of mixing results. */
+async function acquireOutputLock(
+  output: string,
+): Promise<{ release: () => Promise<void> }> {
+  const file = path.join(output, OUTPUT_LOCK);
+  try {
+    await fs.writeFile(
+      file,
+      `${JSON.stringify({ pid: process.pid, acquired_at: new Date().toISOString() })}\n`,
+      { flag: 'wx', mode: 0o644 },
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+      throw new Error(
+        `Another regrade is writing to ${output}. Wait for it to finish; if none is running, remove ${file}.`,
+      );
+    throw error;
+  }
+  return { release: () => fs.rm(file, { force: true }) };
 }
 
 /**

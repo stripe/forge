@@ -1137,12 +1137,24 @@ describe('experiment run scorecards', () => {
         value.runs[0]!.run_id = '../unsafe';
         value.runs[0]!.result_path = 'runs/../unsafe/result.json';
       },
+      (value: typeof report) => {
+        Object.assign(value.runs[0]!, { regrade_path: '../other.json' });
+      },
+      (value: typeof report) => {
+        Object.assign(value, { result_root: '' });
+      },
     ]) {
       const changed = structuredClone(report);
       mutate(changed);
       assert.throws(() => parseExperimentRunReport(changed));
     }
     assert.deepEqual(parseExperimentRunReport(report), report);
+    const regraded = structuredClone(report);
+    Object.assign(regraded, { result_root: '/source/experiment' });
+    Object.assign(regraded.runs[0]!, {
+      regrade_path: `runs/${regraded.runs[0]!.run_id}.json`,
+    });
+    assert.deepEqual(parseExperimentRunReport(regraded), regraded);
     const duplicate = build([row(0), row(1)]);
     duplicate.runs[1]!.run_id = duplicate.runs[0]!.run_id;
     duplicate.runs[1]!.result_path = duplicate.runs[0]!.result_path;
