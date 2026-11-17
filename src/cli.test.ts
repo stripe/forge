@@ -733,14 +733,15 @@ describe('Forge CLI', () => {
         engine: {
           ...defaultForgeEngine,
           async validateRuntime(requests, signal) {
-            resolved = await requests[0]!.composition.credentialResolver.resolve(
-              credentialReference('mcp.key'),
-              {
-                runId: 'readiness',
-                purpose: 'forge-eval',
-                signal: signal ?? new AbortController().signal,
-              },
-            );
+            resolved =
+              await requests[0]!.composition.credentialResolver.resolve(
+                credentialReference('mcp.key'),
+                {
+                  runId: 'readiness',
+                  purpose: 'forge-eval',
+                  signal: signal ?? new AbortController().signal,
+                },
+              );
             return [];
           },
         },
@@ -773,7 +774,9 @@ describe('Forge CLI', () => {
       },
     );
     assert.equal(exitCode, 2, stderr);
-    assert.ok(stderr.includes('--credential-env is not valid for this command'));
+    assert.ok(
+      stderr.includes('--credential-env is not valid for this command'),
+    );
   });
 
   it('does not build the host image when pure preflight fails', async () => {

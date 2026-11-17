@@ -299,9 +299,7 @@ export async function validateRuntimeWithSetupActions(
       createSetupExecutorForRegistry(setupActions),
     );
     if (
-      plan.setup.some(
-        (step) => readinessMcpServers(plan, step).length > 0,
-      ) &&
+      plan.setup.some((step) => readinessMcpServers(plan, step).length > 0) &&
       !preflight.agent.pluginInstaller?.checkMcp
     )
       throw new Error(
@@ -431,9 +429,7 @@ export async function validateRuntimeWithSetupActions(
           receipt.native_plugin_id.split('@')[0] !==
             definition.distribution.plugin.split('@')[0]
         )
-          throw new Error(
-            'Plugin receipt does not match the expected plugin.',
-          );
+          throw new Error('Plugin receipt does not match the expected plugin.');
         if (definition.mcpServers.length === 0) continue;
         await preflight.agent.pluginInstaller!.checkMcp!({
           receipt,
