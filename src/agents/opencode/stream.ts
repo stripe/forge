@@ -150,14 +150,13 @@ export function parseOpenCodeStream(
           if (calls.size >= 2_000) throw new Error();
           calls.set(partId, {
             ...call,
-            result: {
-              content:
-                typeof output === 'string'
-                  ? output
-                  : '[Forge tool result unavailable.]',
-              ...(typeof output === 'string' ? {} : { truncated: true }),
-              isError: state.status === 'error',
-            },
+            result:
+              typeof output === 'string'
+                ? { content: output, isError: state.status === 'error' }
+                : {
+                    omission: 'output_unavailable',
+                    ...(state.status === 'error' ? { isError: true } : {}),
+                  },
           });
         } else throw new Error();
       }

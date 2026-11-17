@@ -2,7 +2,7 @@ import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
 } from '../atif/index.ts';
-import type { AgentToolCall } from '../contracts/agent.ts';
+import type { AgentToolResultOmission } from '../contracts/agent.ts';
 import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
@@ -143,11 +143,20 @@ export interface CompletionCallSummaryV1 {
   readonly error_code: string | null;
 }
 
+/** A tool's observed result, bounded to 1,048,576 UTF-16 code units of text. */
+export interface InteractionToolResultV1 {
+  readonly content?: string;
+  readonly is_error?: boolean;
+  readonly omission?: AgentToolResultOmission;
+  /** Forge cut `content` at the size limit. */
+  readonly truncated?: boolean;
+}
+
 export interface InteractionToolCallV1 {
   readonly id?: string;
   readonly name: string;
   readonly input?: JsonValue;
-  readonly result?: NonNullable<AgentToolCall['result']>;
+  readonly result?: InteractionToolResultV1;
 }
 
 export interface InteractionTurnV1 {

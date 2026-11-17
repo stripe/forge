@@ -863,6 +863,129 @@ describe('driver fallback redaction', () => {
   });
 });
 
+describe('driver fallback tool results', () => {
+  const cut = '\n[Forge truncated driver evidence.]';
+  const resultsOf = (calls: readonly AgentToolCall[]) => {
+    const { selected } = fallbackOf(calls);
+    const step = selected.trajectory.steps[1];
+    return step?.source === 'agent' ? step.observation?.results : undefined;
+  };
+
+  function fallbackOf(toolCalls: readonly AgentToolCall[]) {
+    const selected = selectAgentEvidence({
+      agent,
+      identity,
+      model: 'test-model',
+      sessionId: SESSION_ID,
+      completedTurns: [{ user: 'Prompt', assistant: 'Done.', toolCalls }],
+      collected: { kind: 'unavailable', reason: UNAVAILABLE },
+    });
+    return { selected };
+  }
+
+  it('renders each Forge marker once from the reported omission, without an error claim', () => {
+    const results = resultsOf([
+      { id: 'a', name: 'T', result: { omission: 'not_completed' } },
+      { id: 'b', name: 'T', result: { omission: 'output_unavailable' } },
+      {
+        id: 'c',
+        name: 'T',
+        result: { content: 'text', omission: 'non_text_content' },
+      },
+      { id: 'd', name: 'T', result: { content: 'cut', truncated: true } },
+      { id: 'e', name: 'T', result: { content: 'out', isError: false } },
+      { id: 'f', name: 'T', result: { content: '' } },
+    ]);
+    assert.deepEqual(
+      results?.map(({ content }) => content),
+      [
+        '[Forge tool result unavailable: the call did not complete.]',
+        '[Forge tool result unavailable: the call reported no output.]',
+        'text\n[Forge omitted non-text tool result content.]',
+        'cut\n[Forge truncated the tool result.]',
+        'out',
+        '',
+      ],
+    );
+    assert.deepEqual(
+      results?.map(({ extra }) => extra),
+      [
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { is_error: false },
+        undefined,
+      ],
+    );
+  });
+
+  it('keeps the marker when a long result is cut', () => {
+    const results = resultsOf([
+      {
+        id: 'a',
+        name: 'T',
+        result: { content: 'x'.repeat(9000), truncated: true },
+      },
+    ]);
+    const content = String(results?.[0]?.content ?? '');
+    assert.ok(content.endsWith(`${cut}\n[Forge truncated the tool result.]`));
+    assert.ok(content.length <= 8192);
+  });
+
+  it('never splits a surrogate pair at the argument or result cut', () => {
+    const argumentEnd = 4096 - cut.length;
+    const argumentPrefix = '{"v":"';
+    const argumentBody = 'x'.repeat(argumentEnd - 1 - argumentPrefix.length);
+    const resultEnd = 8192 - cut.length;
+    const { selected } = fallbackOf([
+      {
+        id: 'a',
+        name: 'T',
+        input: { v: `${argumentBody}😀${'y'.repeat(300)}` },
+        result: { content: `${'x'.repeat(resultEnd - 1)}😀${'y'.repeat(300)}` },
+      },
+    ]);
+    const step = selected.trajectory.steps[1];
+    assert.ok(step?.source === 'agent');
+    assert.equal(
+      (step.tool_calls?.[0]?.arguments as Record<string, string>)
+        .forge_truncated_arguments,
+      `${argumentPrefix}${argumentBody}${cut}`,
+    );
+    assert.equal(
+      step.observation?.results[0]?.content,
+      `${'x'.repeat(resultEnd - 1)}${cut}`,
+    );
+  });
+
+  it('truncates a shallow argument object with more than 128 values', () => {
+    const input = Object.fromEntries(
+      Array.from({ length: 130 }, (_, index) => [`k${index}`, index]),
+    );
+    const { selected } = fallbackOf([{ name: 'T', input }]);
+    const step = selected.trajectory.steps[1];
+    assert.ok(step?.source === 'agent');
+    assert.deepEqual(Object.keys(step.tool_calls?.[0]?.arguments ?? {}), [
+      'forge_truncated_arguments',
+    ]);
+  });
+
+  it('marks the assistant message when tool calls are dropped', () => {
+    const calls = Array.from({ length: 300 }, (_, index) => ({
+      name: 'T',
+      input: { index },
+    }));
+    const { selected } = fallbackOf(calls);
+    const step = selected.trajectory.steps[1];
+    assert.ok(step?.source === 'agent');
+    assert.equal(
+      step.message,
+      'Done.\n[Forge omitted additional tool calls and results.]',
+    );
+  });
+});
+
 describe('parseAgentEvidenceIdentity', () => {
   it('freezes a detached identity snapshot', () => {
     const input = { ...identity };

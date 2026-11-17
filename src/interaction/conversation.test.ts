@@ -23,9 +23,8 @@ it('snapshots tool results so later adapter mutation cannot rewrite evidence', (
   assert.ok(Object.isFrozen(calls[0]?.result));
 });
 
-it('bounds snapshotted results with a visible marker without splitting an emoji', () => {
-  const marker = '\n[Forge truncated the tool result.]';
-  const prefixLength = 1_048_576 - marker.length;
+it('bounds snapshotted results without splitting an emoji, and only Forge sets truncated', () => {
+  const prefixLength = 1_048_576;
   const original = 'x'.repeat(prefixLength - 1) + '😀' + 'x'.repeat(100);
   const [call] = snapshotAgentToolCalls([
     {
@@ -33,7 +32,7 @@ it('bounds snapshotted results with a visible marker without splitting an emoji'
       result: { content: original, isError: true },
     },
   ]);
-  assert.equal(call!.result!.content, 'x'.repeat(prefixLength - 1) + marker);
+  assert.equal(call!.result!.content, 'x'.repeat(prefixLength - 1));
   assert.equal(call!.result!.truncated, true);
   assert.equal(call!.result!.isError, true);
   const exact = 'x'.repeat(1_048_576);
@@ -41,6 +40,12 @@ it('bounds snapshotted results with a visible marker without splitting an emoji'
     snapshotAgentToolCalls([{ name: 'Read', result: { content: exact } }])[0]!
       .result,
     { content: exact },
+  );
+  assert.deepEqual(
+    snapshotAgentToolCalls([
+      { name: 'Read', result: { content: 'short', truncated: true } },
+    ])[0]!.result,
+    { content: 'short' },
   );
 });
 

@@ -11,17 +11,35 @@ import type {
   RuntimeStateDirectoryRequirement,
 } from './runtime.ts';
 
+/** Why a tool result is not the tool's complete observed output. */
+export type AgentToolResultOmission =
+  /** Text is present, but the native result had non-text parts Forge does not retain. */
+  | 'non_text_content'
+  /** The call had started but not finished, so it has no output to report. */
+  | 'not_completed'
+  /** The call finished, but the native record carries no usable output. */
+  | 'output_unavailable';
+
+export interface AgentToolResult {
+  /** Observed output text; absent when nothing was observed. */
+  readonly content?: string;
+  /** Set only when the native record reports success or failure. */
+  readonly isError?: boolean;
+  readonly omission?: AgentToolResultOmission;
+  /** Forge sets this when it cuts `content` at its size limit; adapter values are ignored. */
+  readonly truncated?: boolean;
+}
+
 export interface AgentToolCall {
   readonly id?: string;
   readonly name: string;
   readonly input?: unknown;
-  /** Observable text/structured output; Forge redacts then bounds it to 1,048,576 UTF-16 code units. */
-  readonly result?: {
-    readonly content: string;
-    readonly isError?: boolean;
-    /** Native result content was unavailable or partly omitted. */
-    readonly truncated?: boolean;
-  };
+  /**
+   * What the tool reported, as observed facts. Forge redacts `content`, then
+   * bounds it to 1,048,576 UTF-16 code units, and renders every judge-visible
+   * marker itself, so adapters never write Forge prose into `content`.
+   */
+  readonly result?: AgentToolResult;
 }
 
 export interface AgentTurn {

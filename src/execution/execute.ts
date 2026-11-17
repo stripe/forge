@@ -78,7 +78,9 @@ import {
   type ConversationTurn,
   runConversation,
 } from '../interaction/index.ts';
-import { boundToolResult } from '../interaction/toolResult.ts';
+import {
+  interactionToolResult,
+} from '../interaction/toolResult.ts';
 import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import {
@@ -931,12 +933,7 @@ function snapshotAgentTurn(
       !call ||
       !isSafeToolMetadata(call.name) ||
       (call.id !== undefined && !isSafeToolMetadata(call.id)) ||
-      (call.result !== undefined &&
-        (typeof call.result.content !== 'string' ||
-          (call.result.isError !== undefined &&
-            typeof call.result.isError !== 'boolean') ||
-          (call.result.truncated !== undefined &&
-            typeof call.result.truncated !== 'boolean')))
+      (call.result !== undefined && !isValidToolResult(call.result))
     ) {
       throw new TypeError('Agent returned an invalid tool call.');
     }
@@ -944,20 +941,11 @@ function snapshotAgentTurn(
   let toolResultRedactions = 0;
   const toolCalls = turn.toolCalls.map((call) => {
     if (call.result === undefined) return call;
-    const redacted = redactSecrets(
-      {
-        content: call.result.content,
-        ...(call.result.isError === undefined
-          ? {}
-          : { isError: call.result.isError }),
-        ...(call.result.truncated === undefined
-          ? {}
-          : { truncated: call.result.truncated }),
-      },
-      secrets,
-    );
+    const { content } = call.result;
+    if (content === undefined) return call;
+    const redacted = redactSecrets(content, secrets);
     toolResultRedactions += redacted.replacements;
-    return { ...call, result: redacted.value };
+    return { ...call, result: { ...call.result, content: redacted.value } };
   });
   return {
     turn: Object.freeze({
@@ -968,6 +956,20 @@ function snapshotAgentTurn(
     }),
     toolResultRedactions,
   };
+}
+
+function isValidToolResult(result: unknown): boolean {
+  if (result === null || typeof result !== 'object') return false;
+  const { content, isError, omission } = result as Record<string, unknown>;
+  return (
+    (content === undefined || typeof content === 'string') &&
+    (isError === undefined || typeof isError === 'boolean') &&
+    (omission === undefined ||
+      omission === 'non_text_content' ||
+      omission === 'not_completed' ||
+      omission === 'output_unavailable') &&
+    (content !== undefined || omission !== undefined)
+  );
 }
 
 function resolveSessionId(
@@ -1711,7 +1713,9 @@ function buildInteractionArtifact(
     tool_calls: turn.toolCalls.map((call) => ({
       ...(call.id === undefined ? {} : { id: call.id }),
       name: call.name,
-      ...(call.result === undefined ? {} : { result: { ...call.result } }),
+      ...(call.result === undefined
+        ? {}
+        : { result: interactionToolResult(call.result) }),
       ...(call.input === undefined ? {} : { input: jsonValue(call.input) }),
     })),
   }));
@@ -1758,19 +1762,7 @@ function redactInteractionArtifact(
   secrets: readonly string[],
 ): InteractionArtifactV1 {
   const redacted = redactSecrets(artifact, secrets).value;
-  const bounded = {
-    ...redacted,
-    turns: redacted.turns.map((turn) => ({
-      ...turn,
-      tool_calls: turn.tool_calls.map((call) => ({
-        ...call,
-        ...(call.result === undefined
-          ? {}
-          : { result: boundToolResult(call.result) }),
-      })),
-    })),
-  };
-  return parseInteractionArtifact(bounded, {
+  return parseInteractionArtifact(redacted, {
     forgeVersion: FORGE_VERSION,
   });
 }

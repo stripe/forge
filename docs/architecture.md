@@ -624,12 +624,16 @@ violation. Agent text, tool calls, tool inputs, optional cost, session identity,
 and optional tool results are snapshotted at the boundary so later adapter
 mutation cannot change the driver ledger.
 
-`AgentToolCall.result` optionally carries `content` (text, limited to
-1,048,576 UTF-16 code units), `isError`, and `truncated` (native content was
-unavailable or omitted). Forge redacts result text before this boundary's limit
-is applied; oversized text retains a marked prefix and sets `truncated: true`.
-The same limit applies after audit redaction. The interaction audit retains this
-optional object; old turns may omit it.
+`AgentToolCall.result` optionally reports observed facts: `content` (text,
+limited to 1,048,576 UTF-16 code units; absent when nothing was observed),
+`isError` (only when the native record states success or failure), and
+`omission` (`non_text_content`, `not_completed`, or `output_unavailable`).
+Adapters never write Forge prose into `content`. Forge redacts result text
+before this boundary's limit is applied; oversized text keeps an unmarked prefix
+and Forge sets `truncated: true` (adapter-supplied values are ignored). The interaction
+audit retains the result as `content`, `is_error`, `omission`, and `truncated`;
+turns without results omit it. Judge-visible markers are rendered once, by
+driver fallback.
 
 One-shot and multi-turn interaction are described separately below.
 
@@ -1088,8 +1092,9 @@ with an omission marker.
 Available tool-result text retains up to 8,192 code units per call, correlated
 with its invocation and error state. Claude Code supplies tool-result text,
 Codex supplies command and MCP output, and OpenCode supplies tool output or
-errors. A started-only Codex command or MCP call has an unavailable marker and
-makes no claim about success or failure. Native media bytes are omitted
+errors. A started-only Codex command or MCP call, or an OpenCode call with no
+usable output, has an unavailable marker and makes no claim about success or
+failure unless OpenCode's status reports an error. Native media bytes are omitted
 explicitly. Missing driver results cannot be recovered by fallback. Fallback
 redacts resolved secrets from assistant text, arguments, and results immediately
 before clipping each, after normalizing arguments to JSON, so inputs that are not

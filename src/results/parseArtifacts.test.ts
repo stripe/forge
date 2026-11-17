@@ -35,7 +35,7 @@ describe('canonical interaction and judge evidence parsing', () => {
           tool_calls: [
             {
               name: 'Read',
-              result: { content: 'complete', isError: false, truncated: true },
+              result: { content: 'complete', is_error: false, truncated: true },
             },
           ],
         },
@@ -45,10 +45,31 @@ describe('canonical interaction and judge evidence parsing', () => {
     for (const result of [
       null,
       { content: 'x', unexpected: true },
-      { content: 'x', isError: 'false' },
+      { content: 'x', is_error: 'false' },
+      { content: 'x', isError: false },
+      { content: 'x', omission: 'unknown' },
+      {},
+      { is_error: true },
       { content: 'x'.repeat(1024 * 1024 + 1) },
     ]) {
       assert.throws(() =>
+        parseInteractionArtifact(
+          {
+            ...artifact,
+            turns: [
+              { ...artifact.turns[0], tool_calls: [{ name: 'Read', result }] },
+            ],
+          },
+          CONTEXT,
+        ),
+      );
+    }
+    for (const result of [
+      { omission: 'not_completed' },
+      { omission: 'output_unavailable', is_error: true },
+      { content: 'text', omission: 'non_text_content' },
+    ]) {
+      assert.doesNotThrow(() =>
         parseInteractionArtifact(
           {
             ...artifact,

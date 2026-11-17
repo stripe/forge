@@ -1,11 +1,9 @@
-import type { AgentToolCall } from '../contracts/agent.ts';
+import type { AgentToolResult } from '../contracts/agent.ts';
 
 /** Keep observable text without embedding native media bytes or metadata. */
-export function textToolResult(
-  content: unknown,
-): NonNullable<AgentToolCall['result']> {
+export function textToolResult(content: unknown): AgentToolResult {
   if (typeof content === 'string') return { content };
-  let truncated = false;
+  let omitted = false;
   const text = (Array.isArray(content) ? content : [content])
     .flatMap((part: unknown) => {
       if (
@@ -16,14 +14,12 @@ export function textToolResult(
       ) {
         return [(part as { text: string }).text];
       }
-      truncated = true;
+      omitted = true;
       return [];
     })
     .join('\n');
   return {
-    content:
-      text +
-      (truncated ? '\n[Forge omitted non-text tool result content.]' : ''),
-    ...(truncated ? { truncated: true } : {}),
+    content: text,
+    ...(omitted ? { omission: 'non_text_content' } : {}),
   };
 }

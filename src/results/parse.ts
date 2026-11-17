@@ -193,11 +193,19 @@ const interactionToolCall = z
     input: jsonValue.optional(),
     result: z
       .object({
-        content: z.string().max(MAX_TOOL_RESULT_CODE_UNITS),
-        isError: z.boolean().optional(),
+        content: z.string().max(MAX_TOOL_RESULT_CODE_UNITS).optional(),
+        is_error: z.boolean().optional(),
+        omission: z
+          .enum(['non_text_content', 'not_completed', 'output_unavailable'])
+          .optional(),
         truncated: z.boolean().optional(),
       })
       .strict()
+      .refine(
+        ({ content, omission }) =>
+          content !== undefined || omission !== undefined,
+        'A tool result requires content or an omission.',
+      )
       .optional(),
   })
   .strict();

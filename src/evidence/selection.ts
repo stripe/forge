@@ -466,21 +466,11 @@ function fallbackToolCalls(
     const toolArguments = fallbackToolArguments(call.input, redactor);
     if (toolArguments.detailOmitted) detailOmitted = true;
     if (call.result !== undefined) {
-      const safeContent =
-        redactor === undefined
-          ? call.result.content
-          : redactor.text(call.result.content);
-      const content = boundedPrefix(
-        safeContent +
-          (call.result.truncated === true
-            ? '\n[Forge tool result is incomplete.]'
-            : ''),
-        FALLBACK_TOOL_RESULT_CODE_UNITS,
-      );
-      if (content !== safeContent) detailOmitted = true;
+      const rendered = renderToolResult(call.result, redactor);
+      if (rendered.detailOmitted) detailOmitted = true;
       results.push({
         source_call_id: toolCallId,
-        content,
+        content: rendered.content,
         ...(call.result.isError === undefined
           ? {}
           : { extra: { is_error: call.result.isError } }),
@@ -493,6 +483,38 @@ function fallbackToolCalls(
     };
   });
   return { calls: projected, results, detailOmitted };
+}
+
+const RESULT_MARKERS = {
+  non_text_content: '[Forge omitted non-text tool result content.]',
+  not_completed: '[Forge tool result unavailable: the call did not complete.]',
+  output_unavailable:
+    '[Forge tool result unavailable: the call reported no output.]',
+  truncated: '[Forge truncated the tool result.]',
+} as const;
+
+/** Render observed text plus each Forge marker once, keeping markers inside the cut. */
+function renderToolResult(
+  result: NonNullable<AgentToolCall['result']>,
+  redactor: SecretRedactor | undefined,
+): { content: string; detailOmitted: boolean } {
+  const observed =
+    result.content === undefined || redactor === undefined
+      ? (result.content ?? '')
+      : redactor.text(result.content);
+  const markers = [
+    ...(result.omission === undefined ? [] : [RESULT_MARKERS[result.omission]]),
+    ...(result.truncated === true ? [RESULT_MARKERS.truncated] : []),
+  ];
+  const reserved = markers.reduce((total, { length }) => total + length + 1, 0);
+  const body = boundedPrefix(
+    observed,
+    FALLBACK_TOOL_RESULT_CODE_UNITS - reserved,
+  );
+  return {
+    content: [body, ...markers].filter((part) => part !== '').join('\n'),
+    detailOmitted: markers.length > 0 || body !== observed,
+  };
 }
 
 function boundedToolCallCounts(

@@ -87,8 +87,8 @@ it.each([
       const saved = audit.turns[0].tool_calls[0].result;
       assert.ok(saved.content.length <= MAX_TOOL_RESULT_CODE_UNITS);
       assert.equal(saved.truncated, true);
-      assert.equal(saved.isError, false);
-      assert.match(saved.content, /Forge truncated the tool result/);
+      assert.equal(saved.is_error, false);
+      assert.equal(saved.content.includes('Forge'), false);
       assert.match(saved.content, /\[REDACTED\]/);
       assert.equal(saved.content.includes(secret), false);
       assert.equal(saved.content.includes('synthetic-private-'), false);
@@ -98,6 +98,7 @@ it.each([
       );
       assert.equal(trajectoryText.includes(secret), false);
       assert.equal(trajectoryText.includes('synthetic-private-'), false);
+      assert.match(trajectoryText, /\[Forge truncated the tool result\.\]/);
       assert.ok(
         (completed.result.evidence as { redaction_count: number })
           .redaction_count > 0,
@@ -229,7 +230,7 @@ it.each([
         'utf8',
       );
       assert.equal(
-        JSON.parse(auditText).turns[0].tool_calls[0].result.isError,
+        JSON.parse(auditText).turns[0].tool_calls[0].result.is_error,
         false,
       );
       for (const text of [

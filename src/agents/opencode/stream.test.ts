@@ -87,9 +87,21 @@ describe('OpenCode live stream', () => {
     const parsed = parseOpenCodeStream(encode(events));
     assert.equal(parsed.text, turn.response);
     assert.deepEqual(parsed.toolCalls[0]?.result, {
-      content: '[Forge tool result unavailable.]',
-      isError: false,
-      truncated: true,
+      omission: 'output_unavailable',
+    });
+  });
+  it('reports an errored tool without usable error text as an error with no output', () => {
+    const events = openCodeEvents(turn);
+    const toolEvent = events.find((event) => event.type === 'tool_use')!;
+    toolEvent.part.state = {
+      status: 'error',
+      input: { command: 'true' },
+      error: { code: 1 },
+    };
+    const parsed = parseOpenCodeStream(encode(events));
+    assert.deepEqual(parsed.toolCalls[0]?.result, {
+      omission: 'output_unavailable',
+      isError: true,
     });
   });
   it('omits total cost if any finished step lacks cost', () => {

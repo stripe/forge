@@ -1,6 +1,10 @@
 import { isDeepStrictEqual } from 'node:util';
 
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import type {
+  AgentToolCall,
+  AgentToolResult,
+  AgentTurn,
+} from '../../contracts/agent.ts';
 import { textToolResult } from '../toolResult.ts';
 
 const MAX_STREAM_BYTES = 16 * 1024 * 1024;
@@ -245,13 +249,7 @@ function parseItem(item: JsonRecord): StreamItem {
           name: type,
           input: { command: requiredString(item.command) },
           ...(item.status === 'in_progress'
-            ? {
-                result: {
-                  content:
-                    '[Forge tool result unavailable: command did not complete.]',
-                  truncated: true,
-                },
-              }
+            ? { result: { omission: 'not_completed' as const } }
             : typeof item.aggregated_output === 'string'
               ? {
                   result: {
@@ -294,7 +292,7 @@ function parseItem(item: JsonRecord): StreamItem {
       const tool = requiredString(item.tool);
       if (!server || !tool || !Object.hasOwn(item, 'arguments'))
         invalidStream();
-      let output: AgentToolCall['result'];
+      let output: AgentToolResult | undefined;
       if (item.result !== undefined && item.result !== null) {
         const result = requiredRecord(item.result);
         // Metadata is bounded with the event; only result text is retained.
@@ -304,7 +302,7 @@ function parseItem(item: JsonRecord): StreamItem {
         if (result.structured_content != null) {
           output = {
             ...output,
-            content: `${output.content}\nStructured result:\n${JSON.stringify(result.structured_content)}`,
+            content: `${output.content ?? ''}\nStructured result:\n${JSON.stringify(result.structured_content)}`,
           };
         }
         if (item.status === 'failed') output = { ...output, isError: true };
@@ -316,11 +314,7 @@ function parseItem(item: JsonRecord): StreamItem {
         output = { content: requiredString(error.message), isError: true };
       }
       if (item.status === 'in_progress') {
-        output = {
-          content:
-            '[Forge tool result unavailable: tool call did not complete.]',
-          truncated: true,
-        };
+        output = { omission: 'not_completed' };
       }
       return {
         type,

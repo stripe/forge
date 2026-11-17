@@ -1145,7 +1145,7 @@ describe('Codex engine integration', () => {
         id: 'item_1',
         name: 'mcp__fixture__probe',
         input: {},
-        result: { content: `${marker}: [REDACTED]`, isError: true },
+        result: { content: `${marker}: [REDACTED]`, is_error: true },
       },
     ]);
     const trajectory = parseAtifTrajectory(

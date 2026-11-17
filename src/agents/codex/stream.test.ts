@@ -85,9 +85,7 @@ describe('Codex exec stream', () => {
       ),
     );
     for (const call of parsed.toolCalls) {
-      assert.match(call.result!.content, /unavailable: .* did not complete/);
-      assert.equal(call.result!.truncated, true);
-      assert.equal(call.result!.isError, undefined);
+      assert.deepEqual(call.result, { omission: 'not_completed' });
     }
     assert.equal(parsed.toolCalls.length, 2);
   });
@@ -251,11 +249,7 @@ describe('Codex exec stream', () => {
             id: 'item_1',
             name: 'command_execution',
             input: { command: 'bash -lc ls' },
-            result: {
-              content:
-                '[Forge tool result unavailable: command did not complete.]',
-              truncated: true,
-            },
+            result: { omission: 'not_completed' },
           },
         ],
       },

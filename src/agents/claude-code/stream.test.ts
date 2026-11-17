@@ -49,11 +49,10 @@ it('correlates tool results by ID and marks omitted media without retaining its 
     content: 'failure',
     isError: true,
   });
-  assert.equal(parsed.toolCalls[0]?.result?.truncated, true);
-  assert.match(
-    parsed.toolCalls[0]?.result?.content ?? '',
-    /^success\n\[Forge omitted/,
-  );
+  assert.deepEqual(parsed.toolCalls[0]?.result, {
+    content: 'success',
+    omission: 'non_text_content',
+  });
   assert.doesNotMatch(JSON.stringify(parsed), /private-image-bytes/);
 });
 
