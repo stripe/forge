@@ -1068,7 +1068,10 @@ describe('local artifact store', () => {
       rate_limit_wait_ms: 2000,
       ...extra,
     });
-    const parse = (completion_call_totals: object, calls = [call(1, limited), call(2)]) =>
+    const parse = (
+      completion_call_totals: object,
+      calls = [call(1, limited), call(2)],
+    ) =>
       parseRunResult({
         ...result,
         completion_calls: calls,

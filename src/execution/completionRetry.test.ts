@@ -94,7 +94,8 @@ describe('completion retry integration', () => {
       const result = await judgeCriteria(
         { transcript, criteria: ['Done'], signal },
         async (request, attempt) =>
-          (await observed.invoke('judge', request, request.signal, attempt)).content,
+          (await observed.invoke('judge', request, request.signal, attempt))
+            .content,
         {
           now: () => elapsed,
           random: () => 1,
@@ -125,7 +126,8 @@ describe('completion retry integration', () => {
     const judgments = await judgeCriteria(
       { transcript, criteria: ['First', 'Second'], signal },
       async (request, attempt) =>
-          (await prepared.invoke('judge', request, request.signal, attempt)).content,
+        (await prepared.invoke('judge', request, request.signal, attempt))
+          .content,
       {
         now: () => elapsed,
         random: () => 1,
@@ -218,7 +220,8 @@ describe('completion retry integration', () => {
       const results = await judgeCriteria(
         { transcript, criteria: ['Done'], signal },
         async (request, attempt) =>
-          (await prepared.invoke('judge', request, request.signal, attempt)).content,
+          (await prepared.invoke('judge', request, request.signal, attempt))
+            .content,
         {
           now: () => elapsed,
           random: () => 1,
@@ -274,7 +277,7 @@ describe('completion retry integration', () => {
         const turn = await new AvaRolePlayer(
           { task: 'Do the task.', signal },
           (request, attempt) =>
-        prepared.invoke(purpose, request, request.signal, attempt),
+            prepared.invoke(purpose, request, request.signal, attempt),
           options,
         ).nextTurn();
         assert.equal(turn.error?.attempts, 12);
@@ -297,7 +300,10 @@ describe('completion retry integration', () => {
       ),
     );
     for (let index = 0; index < MAX_COMPLETION_CALL_SUMMARIES + 2; index += 1) {
-      const attempt = { retryOrdinal: 0 } as { retryOrdinal: number; sequence?: number };
+      const attempt = { retryOrdinal: 0 } as {
+        retryOrdinal: number;
+        sequence?: number;
+      };
       try {
         await prepared.invoke('judge', { messages: [] }, signal, attempt);
       } catch {
@@ -411,7 +417,7 @@ describe('built-in provider output retries through the completion runtime', () =
             const turn = await new AvaRolePlayer(
               { task: 'Do the task.', signal },
               (request, attempt) =>
-        prepared.invoke(purpose, request, request.signal, attempt),
+                prepared.invoke(purpose, request, request.signal, attempt),
               options,
             ).nextTurn();
             assert.equal(turn.error?.errorType, expectedError);

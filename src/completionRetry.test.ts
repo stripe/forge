@@ -200,22 +200,17 @@ describe('completion retry policy', () => {
   it('keeps retry execution and abort reasons independent of failed observation callbacks', async () => {
     const signal = new AbortController().signal;
     for (const disposition of ['retry', 'exhausted'] as const) {
-      await waitForCompletionRetry(
-        1,
-        { disposition, wait_ms: 0 },
-        signal,
-        {
-          sleep: async () => {},
-          onRetryDecision:
-            disposition === 'retry'
-              ? async () => {
-                  throw new Error('observer unavailable');
-                }
-              : () => {
-                  throw new Error('observer unavailable');
-                },
-        },
-      );
+      await waitForCompletionRetry(1, { disposition, wait_ms: 0 }, signal, {
+        sleep: async () => {},
+        onRetryDecision:
+          disposition === 'retry'
+            ? async () => {
+                throw new Error('observer unavailable');
+              }
+            : () => {
+                throw new Error('observer unavailable');
+              },
+      });
     }
     const controller = new AbortController();
     await assert.rejects(

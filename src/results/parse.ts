@@ -231,7 +231,11 @@ const criterionResult = z
         error: z
           .object({
             type: z.enum(['parse_error', 'request_error']),
-            attempts: z.number().int().min(1).max(MAX_RECORDED_COMPLETION_ATTEMPTS),
+            attempts: z
+              .number()
+              .int()
+              .min(1)
+              .max(MAX_RECORDED_COMPLETION_ATTEMPTS),
             message: z.string().trim().min(1).max(MAX_ERROR_MESSAGE_CHARACTERS),
           })
           .strict(),

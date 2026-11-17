@@ -125,7 +125,10 @@ export function completionRetryDecision(
   const delay = rateLimited
     ? Math.max(scheduledDelay, observation?.retry_after_ms ?? 0)
     : scheduledDelay;
-  if (remainingMs !== undefined && Math.min(MAX_COMPLETION_RETRY_WAIT_MS, delay) >= remainingMs)
+  if (
+    remainingMs !== undefined &&
+    Math.min(MAX_COMPLETION_RETRY_WAIT_MS, delay) >= remainingMs
+  )
     return { state, decision: { disposition: 'exhausted', wait_ms: 0 } };
   return {
     state: {
@@ -143,7 +146,8 @@ export function completionRetryDecision(
 /** The provider reported that the model's structured output was malformed. */
 export function isInvalidOutputFailure(error: unknown): boolean {
   return (
-    error instanceof CompletionInvocationError && error.code === 'invalid_output'
+    error instanceof CompletionInvocationError &&
+    error.code === 'invalid_output'
   );
 }
 
@@ -201,7 +205,8 @@ export async function retryCompletion<T>(
               waitBeforeRetry(attempts, retrySignal),
           }),
     });
-    if (next.decision.disposition === 'exhausted') return { ...outcome, attempts };
+    if (next.decision.disposition === 'exhausted')
+      return { ...outcome, attempts };
   }
 }
 

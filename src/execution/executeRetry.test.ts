@@ -44,7 +44,9 @@ async function run(
       composition: {
         runtime: createFakeRuntimeAdapter().adapter,
         agents: new Map([[agent.adapter.id, agent.adapter]]),
-        completionProviders: new Map([[provider.provider.id, provider.provider]]),
+        completionProviders: new Map([
+          [provider.provider.id, provider.provider],
+        ]),
         credentialResolver: createStaticCredentialResolver(),
         inputProvider: createMemoryRunInputProvider(),
         artifactStore: createMemoryArtifactStore().store,
