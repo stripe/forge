@@ -1184,6 +1184,25 @@ describe('local artifact store', () => {
       (result) => result,
       { plan: pluginPlan },
     );
+    const mirrored = await commitArtifacts(
+      [...core, { path: 'setup.json', body: setup(receipt) }],
+      (result) => ({ ...result, plugin_installations: [receipt] }),
+      { plan: pluginPlan },
+    );
+    assert.deepEqual(
+      (await verifyCompletedRun(mirrored)).result.plugin_installations,
+      [receipt],
+    );
+    const contradictory = await commitArtifacts(
+      [...core, { path: 'setup.json', body: setup(receipt) }],
+      (result) => ({ ...result, plugin_installations: [] }),
+      { plan: pluginPlan },
+    );
+    await assert.rejects(
+      verifyCompletedRun(contradictory),
+      /plugin installations do not match setup/,
+    );
+
     const openCodePlan = createTestResolvedRunPlan({
       agent: {
         adapter: 'opencode',

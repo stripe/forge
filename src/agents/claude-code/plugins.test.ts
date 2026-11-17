@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-
+import { reportPluginInstallations } from '../../../test/fixtures/pluginReport.ts';
 import type { CommandResult, CommandRunner } from '../../contracts/command.ts';
 import type { PluginSelectionV1 } from '../../model/types.ts';
 import {
@@ -220,7 +220,11 @@ describe('Claude plugin installer', () => {
       marketplace_commit: CATALOG_COMMIT,
       native_plugin_id: nativeId,
       version: LATEST_VERSION,
-      source: { kind: 'git-subdir', commit: PLUGIN_COMMIT },
+      source: {
+        kind: 'git-subdir',
+        commit: PLUGIN_COMMIT,
+        path: 'providers/claude/plugin',
+      },
       installed_tree: {
         format: 'forge-plugin-tree-v1',
         sha256: receipt.installed_tree.sha256,
@@ -232,6 +236,42 @@ describe('Claude plugin installer', () => {
       },
     });
     assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
+  });
+
+  it('reports identical native installations as the same on their recorded fields', async () => {
+    const install = async (installedVersion = LATEST_VERSION) => {
+      const state = createMemoryWorkspace();
+      const harness = nativeCommandHarness(state, { installedVersion });
+      return installerPreflight().install(
+        installContext(state, harness.commands),
+      );
+    };
+    const first = await install();
+    const second = await install();
+    assert.equal(Object.hasOwn(first, 'dropped_parts'), false);
+    const comparison = reportPluginInstallations([[first], [second]])
+      .plugin_bundle_comparisons![0]!;
+    assert.equal(comparison.status, 'same');
+    assert.deepEqual(comparison.compared_fields, [
+      {
+        installation_index: 0,
+        fields: [
+          'plugin',
+          'marketplace',
+          'version',
+          'source.kind',
+          'source.path',
+          'source.commit',
+          'installed_tree',
+        ],
+      },
+    ]);
+    const changed = await install('2.0.0');
+    assert.equal(
+      reportPluginInstallations([[first], [changed]])
+        .plugin_bundle_comparisons![0]!.status,
+      'different',
+    );
   });
 
   it('reuses the registered marketplace across repeated plugin setup', async () => {
@@ -380,6 +420,27 @@ describe('Claude plugin installer', () => {
     );
   });
 
+  it('rejects paths outside the receipt contract before native installation', async () => {
+    for (const pluginPath of ['c:x', 'a'.repeat(256), 'é'.repeat(128)]) {
+      for (const catalogSource of [
+        `./${pluginPath}`,
+        { source: 'git-subdir', url: PLUGIN_REPOSITORY, path: pluginPath },
+        { source: 'url', url: PLUGIN_REPOSITORY, path: pluginPath },
+      ]) {
+        const state = createMemoryWorkspace();
+        const harness = nativeCommandHarness(state, { catalogSource });
+        await assert.rejects(
+          installerPreflight().install(installContext(state, harness.commands)),
+          /source|path/,
+        );
+        assert.equal(
+          harness.calls.some((argv) => argv.includes('install')),
+          false,
+        );
+      }
+    }
+  });
+
   it('supports latest entries stored in the marketplace or in an archive', async () => {
     for (const candidate of [
       {
@@ -413,8 +474,12 @@ describe('Claude plugin installer', () => {
       assert.deepEqual(
         receipt.source,
         typeof candidate.source === 'string'
-          ? { kind: 'marketplace-path' }
-          : { kind: 'archive' },
+          ? {
+              kind: 'marketplace-path',
+              path: 'plugins/formatter',
+              commit: CATALOG_COMMIT,
+            }
+          : { kind: 'archive', path: '.' },
       );
     }
   });
@@ -464,7 +529,7 @@ describe('Claude plugin installer', () => {
     const receipt = await installerPreflight().install(
       installContext(state, harness.commands),
     );
-    assert.deepEqual(receipt.source, { kind: 'github' });
+    assert.deepEqual(receipt.source, { kind: 'github', path: '.' });
   });
 
   it('records the native source revision when an unpinned Git source reports one', async () => {
@@ -477,7 +542,7 @@ describe('Claude plugin installer', () => {
     const receipt = await installerPreflight().install(
       installContext(state, harness.commands),
     );
-    assert.deepEqual(receipt.source, { kind: 'github', commit });
+    assert.deepEqual(receipt.source, { kind: 'github', commit, path: '.' });
   });
 
   it('rejects a malformed source revision reported by an unpinned Git installation', async () => {

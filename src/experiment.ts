@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { ForgeComposition } from './contracts/composition.ts';
+import type { AgentPluginInstallationReceipt } from './contracts/plugin.ts';
 import type { ForgeEngine } from './engine.ts';
 import {
   executionDiagnostic,
@@ -62,6 +63,7 @@ export interface ExperimentRunArtifact {
     readonly score: number | null;
   };
   readonly failure: 'role_player_error' | null;
+  readonly plugin_installations?: readonly AgentPluginInstallationReceipt[];
 }
 
 /** The effective latest attempt for one selection, in saved selection order. */
@@ -573,6 +575,12 @@ export async function runExperiment(
                 inspected.artifact === null
                   ? null
                   : `runs/${last.run_id}/result.json`,
+              ...(inspected.artifact?.plugin_installations === undefined
+                ? {}
+                : {
+                    plugin_installations:
+                      inspected.artifact.plugin_installations,
+                  }),
               evaluation:
                 effective.state === 'completed' ? inspected.evaluation : null,
             });
@@ -655,6 +663,9 @@ async function inspectAttempt(
       evaluation: summarizeReportEvaluation(evaluation),
       artifact: {
         location,
+        ...(completed.result.plugin_installations === undefined
+          ? {}
+          : { plugin_installations: completed.result.plugin_installations }),
         evaluation: {
           status: completed.result.evaluation.status,
           score: completed.result.evaluation.score,

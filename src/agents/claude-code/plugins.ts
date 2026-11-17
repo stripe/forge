@@ -10,6 +10,7 @@ import {
   isSafeGitHubRepository,
   isSafeSimpleIdentifier,
   isSafeVersion,
+  isSafeWorkspaceRelativePath,
 } from '../../model/paths.ts';
 import type { PluginSelectionV1 } from '../../model/types.ts';
 import { configurePluginMcp } from '../pluginMcp.ts';
@@ -194,7 +195,11 @@ export function createClaudePluginInstaller(
             marketplace_commit: marketplaceCommit,
             native_plugin_id: nativePluginId,
             version: installed.version,
-            source: pluginSourceReceipt(entry.source, sourceCommit),
+            source: pluginSourceReceipt(
+              entry.source,
+              sourceCommit,
+              marketplaceCommit,
+            ),
             installed_tree: installedTree,
           });
         },
@@ -768,15 +773,9 @@ function isSafeHttpsUrl(value: string): boolean {
 
 function isSafePluginPath(value: string): boolean {
   return (
-    value.length > 0 &&
-    value.length <= 4_096 &&
-    !/[\\\0-\x1f\x7f*?![\]]/.test(value) &&
-    !value.startsWith('/') &&
-    !value.startsWith('.') &&
-    !value.endsWith('/') &&
-    value
-      .split('/')
-      .every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+    isSafeWorkspaceRelativePath(value) &&
+    !/[*?![\]]/.test(value) &&
+    !value.startsWith('.')
   );
 }
 

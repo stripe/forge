@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { parse as parseToml } from 'toml';
 import { describe, it } from 'vitest';
-
+import { reportPluginInstallations } from '../../../test/fixtures/pluginReport.ts';
 import type { CommandRunner } from '../../contracts/command.ts';
 import { parseAgentPluginInstallationReceipt } from '../../contracts/pluginReceipt.ts';
 import { createMemoryWorkspace } from '../../testing/memoryWorkspace.ts';
@@ -344,7 +344,12 @@ describe('Codex native plugin installer', () => {
     const receipt = await test.install();
     assert.deepEqual(parseAgentPluginInstallationReceipt(receipt), receipt);
     assert.equal(receipt.marketplace_commit, commit);
-    assert.deepEqual(receipt.source, { kind: 'marketplace-path' });
+    assert.equal(Object.hasOwn(receipt, 'dropped_parts'), false);
+    assert.deepEqual(receipt.source, {
+      kind: 'marketplace-path',
+      path: 'plugins/fixture',
+      commit,
+    });
     assert.equal(receipt.installed_tree.file_count, 1);
     assert.match(receipt.installed_tree.sha256, /^sha256:[a-f0-9]{64}$/);
     assert.ok(Object.isFrozen(receipt));
@@ -355,6 +360,41 @@ describe('Codex native plugin installer', () => {
       test.calls.some((argv) =>
         argv.includes(`${commit}:.agents/plugins/marketplace.json`),
       ),
+    );
+  });
+
+  it('reports identical native installations as the same on their recorded fields', async () => {
+    const first = await fixture().install();
+    const second = await fixture().install();
+    assert.equal(Object.hasOwn(first, 'dropped_parts'), false);
+    const comparison = reportPluginInstallations([[first], [second]])
+      .plugin_bundle_comparisons![0]!;
+    assert.equal(comparison.status, 'same');
+    assert.deepEqual(comparison.compared_fields, [
+      {
+        installation_index: 0,
+        fields: [
+          'plugin',
+          'marketplace',
+          'version',
+          'source.kind',
+          'source.path',
+          'source.commit',
+          'installed_tree',
+        ],
+      },
+    ]);
+    const changed = await fixture({
+      manifest: {
+        name: 'fixture',
+        version: '1.2.3',
+        description: 'Changed installed content.',
+      },
+    }).install();
+    assert.equal(
+      reportPluginInstallations([[first], [changed]])
+        .plugin_bundle_comparisons![0]!.status,
+      'different',
     );
   });
 
@@ -378,7 +418,10 @@ describe('Codex native plugin installer', () => {
         receipt.source.kind,
         typeof options.source === 'string' ? 'marketplace-path' : 'git-subdir',
       );
-      assert.equal(receipt.source.commit, undefined);
+      assert.equal(
+        receipt.source.commit,
+        typeof options.source === 'string' ? commit : undefined,
+      );
     }
   });
 
@@ -394,7 +437,7 @@ describe('Codex native plugin installer', () => {
     const receipt = await fixture({
       source: { source: 'url', url: 'https://github.com/example/plugin.git' },
     }).install();
-    assert.deepEqual(receipt.source, { kind: 'url' });
+    assert.deepEqual(receipt.source, { kind: 'url', path: '.' });
   });
 
   it('passes catalog Git pins to the native installer and verifies its reported selector', async () => {
@@ -407,7 +450,11 @@ describe('Codex native plugin installer', () => {
     };
     const receipt = await fixture({ source }).install();
     // Native source metadata reports the requested pin, not a resolved commit.
-    assert.deepEqual(receipt.source, { kind: 'git-subdir' });
+    assert.deepEqual(receipt.source, {
+      kind: 'git-subdir',
+      path: 'plugin',
+      commit,
+    });
     for (const sha of [undefined, 'b'.repeat(40)]) {
       await assert.rejects(
         fixture({

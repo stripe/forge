@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { AgentPluginInstallationReceipt } from '../contracts/plugin.ts';
 import type { MutableWorkspace, WorkspaceEntry } from '../contracts/runtime.ts';
 import { sha256Digest } from '../model/hashes.ts';
+import { isSafeWorkspaceRelativePath } from '../model/paths.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
 
 const MAX_PLUGIN_FILES = 100_000;
@@ -42,25 +43,20 @@ export async function inspectInstalledPluginTree(
     );
   }
 
-  // Define receipt ordering independently of adapter listing order or locale.
-  const orderedEntries = [...entries].sort((left, right) =>
-    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
-  );
-  const hash = createHash('sha256');
-  hash.update('forge-plugin-tree-v1\n');
+  const snapshot: InstalledPluginTreeEntry[] = [];
   const prefix = `${relativePath}/`;
   let fileCount = 0;
   let sizeBytes = 0;
-  for (const entry of orderedEntries) {
+  for (const entry of entries) {
     signal.throwIfAborted();
     if (!entry.path.startsWith(prefix)) {
       throw new Error('Installed plugin tree contains an invalid path.');
     }
     const pluginPath = entry.path.slice(prefix.length);
+    if (!isSafeWorkspaceRelativePath(pluginPath))
+      throw new Error('Installed plugin tree contains an invalid path.');
     if (entry.kind === 'directory') {
-      hash.update(
-        serializeCanonicalJson({ kind: 'directory', path: pluginPath }),
-      );
+      snapshot.push({ kind: 'directory', path: pluginPath });
       continue;
     }
     if (
@@ -82,22 +78,50 @@ export async function inspectInstalledPluginTree(
     }
     fileCount += 1;
     sizeBytes += body.byteLength;
-    hash.update(
-      serializeCanonicalJson({
-        kind: 'file',
-        path: pluginPath,
-        sha256: sha256Digest(body),
-        size_bytes: body.byteLength,
-      }),
-    );
+    snapshot.push({
+      kind: 'file',
+      path: pluginPath,
+      sha256: sha256Digest(body),
+      size_bytes: body.byteLength,
+    });
   }
   if (fileCount === 0) {
     throw new Error('Installed plugin tree does not contain a regular file.');
   }
+  return fingerprintInstalledPluginTree(snapshot);
+}
+
+type InstalledPluginTreeEntry =
+  | { readonly kind: 'directory'; readonly path: string }
+  | {
+      readonly kind: 'file';
+      readonly path: string;
+      readonly sha256: string;
+      readonly size_bytes: number;
+    };
+
+/** Pure framing of the bounded installation snapshot; preserves the v1 digest. */
+export function fingerprintInstalledPluginTree(
+  entries: readonly InstalledPluginTreeEntry[],
+): AgentPluginInstallationReceipt['installed_tree'] {
+  const ordered = [...entries].sort((a, b) =>
+    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+  );
+  const hash = createHash('sha256');
+  hash.update('forge-plugin-tree-v1\n');
+  let fileCount = 0;
+  let sizeBytes = 0;
+  for (const entry of ordered) {
+    hash.update(serializeCanonicalJson(entry));
+    if (entry.kind === 'file') {
+      fileCount += 1;
+      sizeBytes += entry.size_bytes;
+    }
+  }
   return Object.freeze({
     format: 'forge-plugin-tree-v1',
     sha256: `sha256:${hash.digest('hex')}`,
-    entry_count: orderedEntries.length,
+    entry_count: ordered.length,
     file_count: fileCount,
     size_bytes: sizeBytes,
   });

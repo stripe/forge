@@ -123,7 +123,7 @@ describe('plugin installation receipts', () => {
   });
 
   it('preserves an observed full Git commit for each Git source kind', () => {
-    for (const kind of ['github', 'url', 'git-subdir']) {
+    for (const kind of ['github', 'url', 'git-subdir', 'marketplace-path']) {
       const source = { kind, commit: 'd'.repeat(40) };
       assert.deepEqual(
         parseAgentPluginInstallationReceipt({ ...RECEIPT, source }).source,
@@ -141,10 +141,6 @@ describe('plugin installation receipts', () => {
       { ...RECEIPT, installed_tree: {} },
       { ...RECEIPT, source: { kind: 'git-subdir', commit: 'not-a-commit' } },
       { ...RECEIPT, source: { kind: 'git-subdir', commit: 'B'.repeat(40) } },
-      {
-        ...RECEIPT,
-        source: { kind: 'marketplace-path', commit: 'b'.repeat(40) },
-      },
       { ...RECEIPT, source: { kind: 'archive', commit: 'b'.repeat(40) } },
       {
         ...RECEIPT,
@@ -155,6 +151,55 @@ describe('plugin installation receipts', () => {
       { ...RECEIPT, version: undefined },
     ]) {
       assert.throws(() => parseAgentPluginInstallationReceipt(input));
+    }
+  });
+
+  it('records distribution paths and dropped behavior without changing old receipts', () => {
+    const source = { ...RECEIPT.source, path: 'providers/example/plugin' };
+    const input = {
+      ...RECEIPT,
+      source,
+      dropped_parts: ['hooks', 'commands', 'agents'],
+    };
+    const parsed = parseAgentPluginInstallationReceipt(input);
+    assert.deepEqual(parsed.source, source);
+    assert.deepEqual(parsed.dropped_parts, input.dropped_parts);
+    assert.ok(Object.isFrozen(parsed.dropped_parts));
+    input.dropped_parts.pop();
+    assert.equal(parsed.dropped_parts?.length, 3);
+    assert.equal(
+      Object.hasOwn(
+        parseAgentPluginInstallationReceipt(RECEIPT),
+        'dropped_parts',
+      ),
+      false,
+    );
+    for (const path of [
+      '../outside',
+      '/absolute',
+      'a/../b',
+      'a//b',
+      'a/',
+      '',
+    ]) {
+      assert.throws(() =>
+        parseAgentPluginInstallationReceipt({
+          ...input,
+          source: { ...source, path },
+        }),
+      );
+    }
+    for (const dropped_parts of [
+      ['skills'],
+      ['hooks', 'hooks'],
+      undefined,
+      'hooks',
+      new Array(1),
+      Object.assign(['hooks'], { extra: true }),
+    ]) {
+      assert.throws(() =>
+        parseAgentPluginInstallationReceipt({ ...input, dropped_parts }),
+      );
     }
   });
 

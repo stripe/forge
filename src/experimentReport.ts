@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseAgentPluginInstallationReceipt } from './contracts/pluginReceipt.ts';
 
 import {
   experimentRunDiagnosticSchema,
@@ -7,7 +8,7 @@ import {
 } from './experimentModel.ts';
 import { sha256Digest } from './model/hashes.ts';
 import { ModelProfileSchema, parseRunSelection } from './model/parse.ts';
-import type { RequirementLevelV1 } from './model/types.ts';
+import type { JsonValue, RequirementLevelV1 } from './model/types.ts';
 import type { EvaluationResultV1 } from './results/types.ts';
 import { serializeCanonicalJson } from './serialization.ts';
 import {
@@ -16,6 +17,7 @@ import {
   parseForgeBuildIdentity,
 } from './version.ts';
 
+const MAX_PLUGIN_INSTALLATIONS = 2_000;
 const MAX_REPORT_BYTES = 64 * 1024 * 1024;
 const count = z.number().int().nonnegative().safe();
 const ratio = z.number().finite().min(0).max(1);
@@ -148,6 +150,11 @@ const runSchema = z
     attempt_count: count.max(10_000),
     result_path: z.string().max(160).nullable(),
     evaluation: evaluationSchema.nullable(),
+    plugin_installations: z
+      .array(z.unknown().transform(parseAgentPluginInstallationReceipt))
+      .max(MAX_PLUGIN_INSTALLATIONS)
+      .readonly()
+      .optional(),
   })
   .strict()
   .superRefine((run, context) => {
@@ -157,6 +164,7 @@ const runSchema = z
       pending !== (run.run_id === null) ||
       pending !== (run.attempt_count === 0) ||
       (pending && run.result_path !== null) ||
+      (run.result_path === null && run.plugin_installations !== undefined) ||
       completed !== (run.evaluation !== null) ||
       (run.state === 'errored') !== (run.error_code !== null) ||
       (run.state !== 'errored' && run.diagnostic !== undefined) ||
@@ -219,12 +227,52 @@ const coordinates = z
   })
   .strict();
 const caseSchema = coordinates.merge(statisticsSchema);
+const pluginBundleFieldSchema = z.enum([
+  'plugin',
+  'marketplace',
+  'version',
+  'source.kind',
+  'source.path',
+  'source.commit',
+  'installed_tree',
+  'dropped_parts',
+]);
+type PluginBundleField = z.infer<typeof pluginBundleFieldSchema>;
+interface BundleFieldObservation {
+  identity?: string;
+  missing: boolean;
+}
+const pluginBundleComparisonSchema = z
+  .object({
+    treatment: z.string().min(1).max(4096),
+    status: z.enum(['same', 'different', 'unknown']),
+    selection_indices: z.array(count).min(1).max(100_000),
+    compared_fields: z
+      .array(
+        z
+          .object({
+            installation_index: count.max(MAX_PLUGIN_INSTALLATIONS - 1),
+            fields: z
+              .array(pluginBundleFieldSchema)
+              .min(1)
+              .max(pluginBundleFieldSchema.options.length),
+          })
+          .strict(),
+      )
+      .max(MAX_PLUGIN_INSTALLATIONS)
+      .optional(),
+  })
+  .strict();
 const reportSchema = z
   .object({
     forge: z.unknown().transform(parseForgeBuildIdentity),
     experiment_run_id: experimentRunIdSchema,
     generated_at: z.string().datetime(),
     checkpoint_sha256: digest,
+    plugin_bundle_comparisons: z
+      .array(pluginBundleComparisonSchema)
+      .max(100_000)
+      .optional(),
     summary: statisticsSchema,
     cases: z.array(caseSchema).min(1).max(100_000),
     runs: z.array(runSchema).min(1).max(100_000),
@@ -297,6 +345,9 @@ export function parseExperimentRunReport(
   ) {
     throw new Error('Report statistics do not match its run rows.');
   }
+  if (report.plugin_bundle_comparisons !== undefined) {
+    report.plugin_bundle_comparisons = comparePluginBundles(report.runs);
+  }
   assertReportBytes(serializeCanonicalJson(report));
   return report;
 }
@@ -314,6 +365,7 @@ export function buildExperimentRunReport(input: {
     generated_at: input.generatedAt,
     checkpoint_sha256: sha256Digest(input.checkpointBody),
     ...aggregateRuns(input.runs),
+    plugin_bundle_comparisons: comparePluginBundles(input.runs),
     runs: input.runs,
   });
 }
@@ -361,6 +413,96 @@ function aggregateRuns(runs: ExperimentRunReportRunV1[]): {
       ...statistics(group.runs),
     })),
   };
+}
+
+/** Compare realized treatments across cases, repetitions, models, and adapters. */
+function comparePluginBundles(
+  runs: readonly ExperimentRunReportRunV1[],
+): z.infer<typeof pluginBundleComparisonSchema>[] {
+  const treatments = new Map<string, ExperimentRunReportRunV1[]>();
+  for (const run of runs) {
+    if (run.result_path === null) continue;
+    const group = treatments.get(run.selection.treatment) ?? [];
+    group.push(run);
+    treatments.set(run.selection.treatment, group);
+  }
+  return [...treatments].map(([treatment, group]) => {
+    const installations = new Map<
+      number,
+      Map<PluginBundleField, BundleFieldObservation>
+    >();
+    let installationCount: number | undefined;
+    let unknown = false;
+    let different = false;
+    for (const run of group) {
+      if (run.plugin_installations === undefined) {
+        unknown = true;
+        continue;
+      }
+      if (
+        installationCount !== undefined &&
+        installationCount !== run.plugin_installations.length
+      ) {
+        different = true;
+      }
+      installationCount = run.plugin_installations.length;
+      for (const [index, receipt] of run.plugin_installations.entries()) {
+        const observations =
+          installations.get(index) ??
+          new Map<PluginBundleField, BundleFieldObservation>();
+        installations.set(index, observations);
+        const values: Record<PluginBundleField, JsonValue | undefined> = {
+          plugin: receipt.plugin,
+          marketplace: receipt.marketplace,
+          version: receipt.version,
+          'source.kind': receipt.source.kind,
+          'source.path': receipt.source.path,
+          'source.commit': receipt.source.commit,
+          installed_tree: receipt.installed_tree,
+          dropped_parts:
+            receipt.dropped_parts === undefined
+              ? undefined
+              : [...receipt.dropped_parts].sort(),
+        };
+        for (const field of pluginBundleFieldSchema.options) {
+          const observation = observations.get(field) ?? { missing: false };
+          const value = values[field];
+          if (value === undefined) {
+            observation.missing = true;
+          } else {
+            const identity = serializeCanonicalJson(value);
+            if (
+              observation.identity !== undefined &&
+              observation.identity !== identity
+            )
+              different = true;
+            observation.identity = identity;
+          }
+          observations.set(field, observation);
+        }
+      }
+    }
+    const comparedFields: {
+      installation_index: number;
+      fields: PluginBundleField[];
+    }[] = [];
+    for (const [installation_index, observations] of installations) {
+      const fields: PluginBundleField[] = [];
+      for (const field of pluginBundleFieldSchema.options) {
+        const observation = observations.get(field)!;
+        if (observation.identity === undefined) continue;
+        fields.push(field);
+        if (observation.missing) unknown = true;
+      }
+      comparedFields.push({ installation_index, fields });
+    }
+    return {
+      treatment,
+      status: different ? 'different' : unknown ? 'unknown' : 'same',
+      selection_indices: group.map((run) => run.selection_index),
+      compared_fields: comparedFields,
+    };
+  });
 }
 
 function statistics(
