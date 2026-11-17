@@ -366,13 +366,17 @@ describe('built-in provider output retries through the completion runtime', () =
             onRetryDecision: prepared.recordRetryDecision,
           };
           const attempts = quotaExhausted ? 1 : invalidEnvelope ? 4 : 3;
+          // A provider-reported malformed reply is the same fault as one the
+          // caller's parser rejects.
+          const expectedError =
+            failureKind === 'invalid_output' ? 'parse_error' : 'request_error';
           if (purpose === 'role_player') {
             const turn = await new AvaRolePlayer(
               { task: 'Do the task.', signal },
               (request) => prepared.invoke(purpose, request, request.signal),
               options,
             ).nextTurn();
-            assert.equal(turn.error?.errorType, 'request_error');
+            assert.equal(turn.error?.errorType, expectedError);
             assert.equal(turn.error?.attempts, attempts);
           } else {
             const results = await judgeCriteria(
@@ -382,7 +386,7 @@ describe('built-in provider output retries through the completion runtime', () =
                   .content,
               options,
             );
-            assert.equal(results[0]!.error?.type, 'request_error');
+            assert.equal(results[0]!.error?.type, expectedError);
             assert.equal(results[0]!.error?.attempts, attempts);
           }
           assert.equal(requests, attempts);

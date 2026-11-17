@@ -4,6 +4,7 @@ import {
   completionRetryDecision,
   MAX_COMPLETION_ATTEMPTS,
   INITIAL_COMPLETION_RETRY_STATE,
+  retryCompletion,
   waitForCompletionRetry,
 } from './completionRetry.ts';
 import { CompletionInvocationError } from './contracts/completion.ts';
@@ -298,5 +299,60 @@ describe('completion retry policy', () => {
     assert.deepEqual(decisions, [
       { disposition: 'rate_limit_retry', wait_ms: 123 },
     ]);
+  });
+
+  describe('retryCompletion', () => {
+    const signal = new AbortController().signal;
+    const failing = async () => ({
+      ok: false as const,
+      error: failure(429),
+      parseFailure: false,
+    });
+
+    it('returns the first success and counts attempts on exhaustion', async () => {
+      const waits: number[] = [];
+      const sleep = async (ms: number) => {
+        waits.push(ms);
+      };
+      assert.deepEqual(
+        await retryCompletion(signal, { sleep, random: () => 1 }, async (n) =>
+          n < 3 ? failing() : { ok: true, value: n },
+        ),
+        { ok: true, value: 3 },
+      );
+      assert.deepEqual(waits, [2000, 4000]);
+      const exhausted = await retryCompletion(
+        signal,
+        { sleep, random: () => 1 },
+        failing,
+      );
+      assert.equal(exhausted.ok, false);
+      assert.equal(exhausted.ok ? 0 : exhausted.attempts, 7);
+    });
+
+    it('prefers sleep over the legacy waitBeforeRetry seam', async () => {
+      const sleeps: number[] = [];
+      const legacy: number[] = [];
+      const options = {
+        random: () => 1,
+        sleep: async (ms: number) => {
+          sleeps.push(ms);
+        },
+        waitBeforeRetry: async (attempt: number) => {
+          legacy.push(attempt);
+        },
+      };
+      await retryCompletion(signal, options, async (n) =>
+        n < 2 ? failing() : { ok: true, value: n },
+      );
+      assert.deepEqual(sleeps, [2000]);
+      assert.deepEqual(legacy, []);
+      await retryCompletion(
+        signal,
+        { random: () => 1, waitBeforeRetry: options.waitBeforeRetry },
+        async (n) => (n < 2 ? failing() : { ok: true, value: n }),
+      );
+      assert.deepEqual(legacy, [1]);
+    });
   });
 });

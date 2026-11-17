@@ -1,9 +1,8 @@
 import { z } from 'zod';
 import {
   type CompletionRetryOptions,
-  completionRetryDecision,
-  INITIAL_COMPLETION_RETRY_STATE,
-  waitForCompletionRetry,
+  isInvalidOutputFailure,
+  retryCompletion,
 } from '../completionRetry.ts';
 import type {
   CompletionMessage,
@@ -92,7 +91,7 @@ export interface CriterionJudgeExecutionOptions extends CompletionRetryOptions {
   readonly redactionSecrets?: readonly string[];
   /** Validate dispatch invariants outside the retryable provider invocation. */
   readonly validateRequest?: (request: CriterionCompletionRequest) => void;
-  /** Legacy test seam that overrides each retry wait. */
+  /** @deprecated Use `sleep`; see `CompletionRetryOptions.waitBeforeRetry`. */
   readonly waitBeforeRetry?: (
     failedAttempt: number,
     signal: AbortSignal | undefined,
@@ -283,83 +282,78 @@ async function judgeOneCriterion(
   invoke: CriterionCompletionInvoker,
   options: CriterionJudgeExecutionOptions,
 ): Promise<CriterionResultV1> {
-  let retryState = INITIAL_COMPLETION_RETRY_STATE;
-  let attempt = 0;
   const systemPrompt = renderCriterionJudgePrompt(input, criterion.value);
+  const signal = input.signal ?? new AbortController().signal;
   let finalParseExplanation = 'Judge response was unavailable.';
   let finalParseMessage = finalParseExplanation;
 
-  while (true) {
-    attempt += 1;
-    let failure: unknown;
-    let parseFailure = false;
-    input.signal?.throwIfAborted();
-    const request: CriterionCompletionRequest = {
-      systemPrompt,
-      retryOrdinal: retryState.ordinal,
-      messages: [
-        { role: 'user', content: 'Return the requested structured judgment.' },
-      ],
-      maxTokens: 1024,
-      responseSchema: CRITERION_JUDGMENT_RESPONSE_SCHEMA,
-      signal: input.signal ?? new AbortController().signal,
-    };
-    options.validateRequest?.(request);
-    try {
-      const raw = await invoke(request);
-      input.signal?.throwIfAborted();
-      const outcome = parseJudgeResponse(raw, criterion);
-      if (outcome.valid) return outcome.result;
-      finalParseExplanation = outcome.explanation;
-      finalParseMessage = outcome.message;
-      parseFailure = true;
-    } catch (error) {
-      if (isAbort(error, input.signal)) throw error;
-      failure = error;
-    }
-
-    const next = completionRetryDecision(
-      retryState,
-      failure,
-      parseFailure,
-      (options.random ?? Math.random)(),
-    );
-    retryState = next.state;
-    await waitForCompletionRetry(failure, next.decision, input.signal!, {
-      ...options,
-      ...(options.waitBeforeRetry === undefined
-        ? {}
-        : {
-            sleep: () => options.waitBeforeRetry!(attempt, input.signal),
-          }),
-    });
-    if (next.decision.disposition !== 'exhausted') continue;
-    if (!parseFailure) {
-      return criterionResult(criterion, {
-        passed: null,
-        error: {
-          type: 'request_error',
-          attempts: attempt,
-          message: boundedErrorMessage(
-            failure,
-            'Judge request failed.',
+  const outcome = await retryCompletion<CriterionResultV1>(
+    signal,
+    options,
+    async (attempt) => {
+      signal.throwIfAborted();
+      const request: CriterionCompletionRequest = {
+        systemPrompt,
+        retryOrdinal: attempt - 1,
+        messages: [
+          {
+            role: 'user',
+            content: 'Return the requested structured judgment.',
+          },
+        ],
+        maxTokens: 1024,
+        responseSchema: CRITERION_JUDGMENT_RESPONSE_SCHEMA,
+        signal,
+      };
+      options.validateRequest?.(request);
+      try {
+        const raw = await invoke(request);
+        signal.throwIfAborted();
+        const parsed = parseJudgeResponse(raw, criterion);
+        if (parsed.valid) return { ok: true, value: parsed.result };
+        finalParseExplanation = parsed.explanation;
+        finalParseMessage = parsed.message;
+        return { ok: false, error: undefined, parseFailure: true };
+      } catch (error) {
+        if (isAbort(error, input.signal)) throw error;
+        // Malformed model output is the same fault whether the provider or
+        // the parser caught it.
+        if (isInvalidOutputFailure(error)) {
+          finalParseMessage = boundedErrorMessage(
+            error,
+            'Judge response was not valid.',
             options.redactionSecrets,
-          ),
-        },
-        explanation: `Judge request failed after ${attempt} attempts.`,
-      });
-    }
-    break;
+          );
+          return { ok: false, error, parseFailure: true };
+        }
+        return { ok: false, error, parseFailure: false };
+      }
+    },
+  );
+  if (outcome.ok) return outcome.value;
+  if (!outcome.parseFailure) {
+    return criterionResult(criterion, {
+      passed: null,
+      error: {
+        type: 'request_error',
+        attempts: outcome.attempts,
+        message: boundedErrorMessage(
+          outcome.error,
+          'Judge request failed.',
+          options.redactionSecrets,
+        ),
+      },
+      explanation: `Judge request failed after ${outcome.attempts} attempts.`,
+    });
   }
-
   return criterionResult(criterion, {
     passed: null,
     error: {
       type: 'parse_error',
-      attempts: attempt,
+      attempts: outcome.attempts,
       message: finalParseMessage,
     },
-    explanation: `${finalParseExplanation} (unavailable after ${attempt} attempts)`,
+    explanation: `${finalParseExplanation} (unavailable after ${outcome.attempts} attempts)`,
   });
 }
 

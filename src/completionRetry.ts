@@ -39,6 +39,14 @@ export interface CompletionRetryOptions {
   readonly now?: () => number;
   readonly random?: () => number;
   readonly sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  /**
+   * @deprecated Use `sleep`. Overrides each retry wait with a caller-chosen
+   * delay and never receives the policy's `wait_ms`; an explicit `sleep` wins.
+   */
+  readonly waitBeforeRetry?: (
+    failedAttempt: number,
+    signal: AbortSignal,
+  ) => Promise<void>;
   readonly onRetryDecision?: (
     error: unknown,
     decision: CompletionRetryDecision,
@@ -116,6 +124,66 @@ export function completionRetryDecision(
       wait_ms: Math.min(MAX_COMPLETION_RETRY_WAIT_MS, delay),
     },
   };
+}
+
+/** The provider reported that the model's structured output was malformed. */
+export function isInvalidOutputFailure(error: unknown): boolean {
+  return (
+    error instanceof CompletionInvocationError && error.code === 'invalid_output'
+  );
+}
+
+export type CompletionAttemptOutcome<T> =
+  | { readonly ok: true; readonly value: T }
+  | {
+      readonly ok: false;
+      readonly error: unknown;
+      /** The reply arrived but was unusable, so the short schedule applies. */
+      readonly parseFailure: boolean;
+    };
+
+export type CompletionRetryResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | {
+      readonly ok: false;
+      readonly error: unknown;
+      readonly parseFailure: boolean;
+      readonly attempts: number;
+    };
+
+/**
+ * Shared driver for one logical completion request: run `attempt`, ask the
+ * policy about each failure, wait, and stop when the policy is exhausted.
+ * `attempt` throws only to abort the request.
+ */
+export async function retryCompletion<T>(
+  signal: AbortSignal,
+  options: CompletionRetryOptions,
+  attempt: (attemptNumber: number) => Promise<CompletionAttemptOutcome<T>>,
+): Promise<CompletionRetryResult<T>> {
+  let state = INITIAL_COMPLETION_RETRY_STATE;
+  for (let attempts = 1; ; attempts += 1) {
+    const outcome = await attempt(attempts);
+    if (outcome.ok) return outcome;
+    const next = completionRetryDecision(
+      state,
+      outcome.error,
+      outcome.parseFailure,
+      (options.random ?? Math.random)(),
+    );
+    state = next.state;
+    const waitBeforeRetry = options.waitBeforeRetry;
+    await waitForCompletionRetry(outcome.error, next.decision, signal, {
+      ...options,
+      ...(options.sleep !== undefined || waitBeforeRetry === undefined
+        ? {}
+        : {
+            sleep: (_milliseconds: number, retrySignal: AbortSignal) =>
+              waitBeforeRetry(attempts, retrySignal),
+          }),
+    });
+    if (next.decision.disposition === 'exhausted') return { ...outcome, attempts };
+  }
 }
 
 export async function waitForCompletionRetry(
