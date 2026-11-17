@@ -91,10 +91,7 @@ const noRetryWait = {
 describe('AvaRolePlayer', () => {
   it('initializes bounded private needs with a strict structured request', async () => {
     const completion = scriptedCompletion(
-      initialResponse(
-        TWO_NEEDS,
-        'What should the checkout feel like?',
-      ),
+      initialResponse(TWO_NEEDS, 'What should the checkout feel like?'),
     );
     const ava = new AvaRolePlayer(
       { task: 'Add Checkout', context: 'A developer upgrading an application' },
@@ -765,10 +762,7 @@ describe('AvaRolePlayer', () => {
       [
         'duplicate needs',
         initialResponse(
-          [
-            { description: 'Same need' },
-            { description: 'same need' },
-          ],
+          [{ description: 'Same need' }, { description: 'same need' }],
           'Question?',
         ),
       ],
