@@ -188,6 +188,8 @@ const runSchema = z
 const statisticsSchema = z
   .object({
     rate_limit_wait_ms: count.optional(),
+    /** Runs that contributed a measured wait; compare with `selections`. */
+    rate_limit_wait_runs: count.optional(),
     selections: count,
     completed: count,
     errored: count,
@@ -431,6 +433,9 @@ function statistics(
             (total, run) => total + (run.rate_limit_wait_ms ?? 0),
             0,
           ),
+          rate_limit_wait_runs: runs.filter(
+            (run) => run.rate_limit_wait_ms !== undefined,
+          ).length,
         }
       : {}),
     selections: runs.length,

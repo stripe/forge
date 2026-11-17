@@ -612,8 +612,11 @@ retry succeeds. `completion_call_totals` continues counting after that cap.
 When available, `report.json` includes `rate_limit_wait_ms` in run rows, case
 groups, and the summary. It sums measured host-completion retry waits from the
 latest verified results, including waits from calls omitted by the cap. Parallel
-waits are added, so this total can exceed wall-clock run time. Older records and
-attempts without a committed result have no measured value.
+waits are added, so this total can exceed wall-clock run time. Case groups and
+the summary also carry `rate_limit_wait_runs`, the number of runs that
+contributed a measured value; when it is below `selections`, the total
+undercounts, because older records and attempts without a committed result have
+no measured value.
 
 ### Inspect evidence
 

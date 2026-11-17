@@ -212,6 +212,19 @@ describe('experiment run scorecards', () => {
     runs[1]!.rate_limit_wait_ms = 23000;
     const report = build(runs);
     assert.equal(report.summary.rate_limit_wait_ms, 83000);
+    assert.equal(report.summary.rate_limit_wait_runs, 2);
+    // A run without a measured wait stays visible as missing coverage rather
+    // than as a zero.
+    const partial = build([...runs, row(2)]);
+    assert.equal(partial.summary.rate_limit_wait_ms, 83000);
+    assert.equal(partial.summary.rate_limit_wait_runs, 2);
+    assert.equal(partial.summary.selections, 3);
+    assert.throws(() =>
+      parseExperimentRunReport({
+        ...partial,
+        summary: { ...partial.summary, rate_limit_wait_runs: 3 },
+      }),
+    );
     assert.equal(
       report.cases.reduce(
         (total, group) => total + (group.rate_limit_wait_ms ?? 0),
