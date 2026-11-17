@@ -245,6 +245,7 @@ describe('AvaRolePlayer', () => {
       ),
     );
     assert.equal(completion.calls[0]!.responseSchema.name, 'ava_initial_needs');
+    assert.equal(completion.calls[0]!.maxTokens, 1400);
     assert.deepEqual(completion.calls[0]!.responseSchema.schema.required, [
       'user_needs',
     ]);
@@ -501,6 +502,7 @@ describe('AvaRolePlayer', () => {
   for (const [description, rejected] of [
     ['Review safe checkout UI', false], // Four words, 23 characters.
     ['Review payment confirmation', false], // Three words, over 24 characters.
+    ['Review  payment  confirmation', false], // Whitespace is normalized before counting words.
     ['one   two   three    four', false], // Normalized length is under 24.
     ['Review safe checkout now', true], // Four words, 24 characters.
     ['Review the complete payment confirmation flow', true],
