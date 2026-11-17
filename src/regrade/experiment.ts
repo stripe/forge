@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { defaultForgeEngine } from '../engine.ts';
+import { defaultForgeEngine, type ForgeEngine } from '../engine.ts';
 import { inspectExperimentRun } from '../experiment.ts';
 import {
   buildExperimentRunReport,
@@ -13,7 +13,8 @@ import { sha256Digest } from '../model/hashes.ts';
 import type { ModelRefV1 } from '../model/types.ts';
 import { FORGE_BUILD_IDENTITY, type ForgeBuildIdentity } from '../version.ts';
 import {
-  REGRADE_RESULT_FORMAT,
+  MAX_REGRADE_RESULT_BYTES,
+  parseRegradeResult,
   type RegradeDependencies,
   type RegradeResultV1,
   regradeCompletedRun,
@@ -30,13 +31,13 @@ export interface RegradeExperimentSummaryV1 {
   readonly output_location: string;
   readonly judge: ModelRefV1;
   readonly regraded: number;
-  /** Regrades already present for the same judge and committed result. */
+  /** Successful regrades already present for the same judge and committed result; saved `judge_error` evaluations are retried. */
   readonly reused: number;
   /** Completed runs without judging criteria; their checks-only evaluation is unchanged. */
   readonly not_judged: number;
   /** Selections with no completed run to regrade (pending or errored at the source). */
   readonly not_completed: number;
-  /** Completed runs that could not be regraded; their report rows are pending. */
+  /** Completed runs that could not be regraded, including those that no longer verify; their report rows are pending. */
   readonly failed: readonly {
     readonly run_id: string;
     readonly message: string;
@@ -86,10 +87,14 @@ export async function regradeExperimentRun(
   const now = input.now ?? (() => new Date());
   const source = await fs.realpath(path.resolve(input.experimentRun));
   const output = path.resolve(input.output);
-  if (isWithin(source, await realpathOfNearestExisting(output)))
-    throw new Error(
-      'The regrade output must be outside the source experiment run, whose runs must stay unchanged.',
-    );
+  // Every directory this command writes into, resolved physically: the output itself and its `runs`
+  // directory, which may be a symlink even when the output is not.
+  for (const directory of [output, path.join(output, 'runs')]) {
+    if (isWithin(source, await realpathOfNearestExisting(directory)))
+      throw new Error(
+        'The regrade output must be outside the source experiment run, whose runs must stay unchanged.',
+      );
+  }
   const jobs = input.jobs ?? 1;
   if (!Number.isSafeInteger(jobs) || jobs < 1)
     throw new TypeError('jobs must be a positive integer.');
@@ -103,9 +108,22 @@ export async function regradeExperimentRun(
     path.join(source, 'experiment.json'),
     'utf8',
   );
-  const attemptCounts = (
-    JSON.parse(checkpointBody) as { entries: { attempts: unknown[] }[] }
-  ).entries.map((entry) => entry.attempts.length);
+  const checkpointEntries = (
+    JSON.parse(checkpointBody) as {
+      entries: { attempts: { state: string }[] }[];
+    }
+  ).entries;
+  const attemptCounts = checkpointEntries.map((entry) => entry.attempts.length);
+  // A completed attempt that no longer verifies is inspected as errored; it is a failure to regrade,
+  // unlike a selection that never completed.
+  const corruptIndexes = new Set(
+    inspection.outcomes.flatMap((outcome, index) =>
+      outcome.state !== 'completed' &&
+      checkpointEntries[index]?.attempts.at(-1)?.state === 'completed'
+        ? [index]
+        : [],
+    ),
+  );
   await fs.mkdir(path.join(output, 'runs'), { recursive: true });
   const lock = await acquireOutputLock(output);
   try {
@@ -119,6 +137,31 @@ export async function regradeExperimentRun(
       outcome.state === 'completed' && outcome.artifact !== null ? [index] : [],
     );
     const outcomes = new Map<number, RegradeOutcome>();
+    for (const index of corruptIndexes)
+      outcomes.set(index, {
+        kind: 'failed',
+        message: 'The saved run failed artifact verification.',
+      });
+    // Read every saved regrade first: one run on another judge makes the whole output incompatible,
+    // and that must be known before any judge call or write fills the gaps.
+    const savedRegrades = new Map<number, SavedRegrade>();
+    for (const index of completedIndexes) {
+      const outcome = inspection.outcomes[index]!;
+      const saved = await loadSavedRegrade(
+        engine,
+        path.join(output, 'runs', `${outcome.run_id}.json`),
+        outcome.artifact!.location,
+      );
+      if (saved !== undefined) savedRegrades.set(index, saved);
+      if (
+        saved?.kind === 'valid' &&
+        (saved.regrade.judge.provider !== input.judge.provider ||
+          saved.regrade.judge.model !== input.judge.model)
+      )
+        throw new Error(
+          'The regrade output already holds regrades from a different judge. Use the same judge to finish it, or a new output directory.',
+        );
+    }
     let next = 0;
     const worker = async () => {
       for (;;) {
@@ -127,6 +170,7 @@ export async function regradeExperimentRun(
         if (index === undefined) return;
         const outcome = inspection.outcomes[index]!;
         const result = await regradeOne(
+          index,
           outcome.run_id!,
           outcome.artifact!.location,
         );
@@ -135,27 +179,21 @@ export async function regradeExperimentRun(
       }
     };
     const regradeOne = async (
+      index: number,
       runId: string,
       location: string,
     ): Promise<RegradeOutcome> => {
       const file = path.join(output, 'runs', `${runId}.json`);
       try {
-        const resultSha256 = sha256Digest(
-          await fs.readFile(path.join(location, 'result.json')),
-        );
-        const existing = await readExistingRegrade(file);
-        if (existing !== undefined) {
-          if (
-            existing.run_id !== runId ||
-            existing.judge.provider !== input.judge.provider ||
-            existing.judge.model !== input.judge.model ||
-            existing.source.result_sha256 !== resultSha256
-          )
-            throw new Error(
-              'An existing regrade in the output uses a different judge or result.',
-            );
-          return { kind: 'reused', regrade: existing };
-        }
+        const saved = savedRegrades.get(index);
+        if (saved?.kind === 'invalid') throw new Error(saved.message);
+        // A saved judge_error says the judge was unavailable, not what it thought: redo it, and keep
+        // successful judgments.
+        if (
+          saved?.kind === 'valid' &&
+          saved.regrade.evaluation.status !== 'judge_error'
+        )
+          return { kind: 'reused', regrade: saved.regrade };
         const regrade = await regradeCompletedRun(
           {
             location,
@@ -258,7 +296,10 @@ export async function regradeExperimentRun(
       regraded: count('regraded'),
       reused: count('reused'),
       not_judged: count('not_judged'),
-      not_completed: inspection.outcomes.length - completedIndexes.length,
+      not_completed:
+        inspection.outcomes.length -
+        completedIndexes.length -
+        corruptIndexes.size,
       failed: Object.freeze(
         [...outcomes.entries()].flatMap(([index, outcome]) =>
           outcome.kind === 'failed'
@@ -337,20 +378,53 @@ function isWithin(parent: string, candidate: string): boolean {
   );
 }
 
-async function readExistingRegrade(
+type SavedRegrade =
+  | { readonly kind: 'valid'; readonly regrade: RegradeResultV1 }
+  | { readonly kind: 'invalid'; readonly message: string };
+
+/** Strictly read the saved regrade at `file` for the committed run at `location`; invalid files fail only their run. */
+async function loadSavedRegrade(
+  engine: ForgeEngine,
   file: string,
-): Promise<RegradeResultV1 | undefined> {
-  let body: string;
+  location: string,
+): Promise<SavedRegrade | undefined> {
+  const body = await readExistingRegrade(file).catch((error: unknown) => ({
+    error,
+  }));
+  if (body === undefined) return undefined;
   try {
-    body = await fs.readFile(file, 'utf8');
+    if (typeof body !== 'string') throw body.error;
+    const verified = await engine.verifyCompletedRun(location);
+    return {
+      kind: 'valid',
+      regrade: parseRegradeResult(JSON.parse(body), {
+        result: verified.result,
+        resultSha256: sha256Digest(
+          await fs.readFile(path.join(location, 'result.json')),
+        ),
+      }),
+    };
+  } catch (error) {
+    return {
+      kind: 'invalid',
+      message: (error instanceof Error ? error.message : String(error)).slice(
+        0,
+        500,
+      ),
+    };
+  }
+}
+
+/** The bounded text of a saved regrade, or `undefined` when none exists. */
+async function readExistingRegrade(file: string): Promise<string | undefined> {
+  try {
+    if ((await fs.stat(file)).size > MAX_REGRADE_RESULT_BYTES)
+      throw new Error('An existing regrade file exceeds its size limit.');
+    return await fs.readFile(file, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
-  const value = JSON.parse(body) as RegradeResultV1;
-  if (value.format !== REGRADE_RESULT_FORMAT)
-    throw new Error('An existing regrade file has an unknown format.');
-  return value;
 }
 
 async function writeAtomic(file: string, body: string): Promise<void> {
