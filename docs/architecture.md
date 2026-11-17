@@ -1008,7 +1008,8 @@ non-focused need's full description or full acceptance statement that have at
 least four whitespace-separated words and 24 characters. Matching ignores case
 and normalizes whitespace to single spaces before applying both thresholds and
 comparing. Ordinary checklist/grading words and shorter private text are
-prompt-only, as is the focused need's own text. A paraphrase or a short private
+prompt-only, as is the focused need's own text, including text another need
+shares with it. A paraphrase or a short private
 value can leak undetected; the shared prompt rule covers these cases.
 Schema, size, and single-message format checks remain. A false disclosure rejection can exhaust
 retries and fail the eval, so the runtime does not compare other private text.

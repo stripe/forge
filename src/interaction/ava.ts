@@ -247,10 +247,18 @@ function validateGeneratedMessage(
     throw new AvaResponseError('Ava exposed an internal need ID.');
   }
   const normalizedMessage = normalizeAvaText(trimmed);
+  const focusedNeed = needs.find((need) => need.id === focusedNeedId);
+  // Text a non-focused need shares with the focused need is not a leak.
+  const focusedTexts = new Set(
+    [focusedNeed?.description, focusedNeed?.acceptance].map((text) =>
+      normalizeAvaText(text ?? ''),
+    ),
+  );
   for (const need of needs) {
     if (need.id === focusedNeedId) continue;
     for (const text of [need.description, need.acceptance]) {
       const privateText = normalizeAvaText(text);
+      if (focusedTexts.has(privateText)) continue;
       if (
         privateText.length >= MIN_AVA_PRIVATE_MATCH_CHARACTERS &&
         privateText.split(' ').length >= MIN_AVA_PRIVATE_MATCH_WORDS &&

@@ -476,6 +476,39 @@ describe('AvaRolePlayer', () => {
     });
   }
 
+  for (const phase of ['initial', 'continuation'] as const) {
+    it(`allows the focused need's acceptance when another need shares it on the ${phase} path`, async () => {
+      const acceptance = 'The proposed approach preserves the existing API.';
+      const needs = [
+        { description: 'Explain the checkout flow', acceptance },
+        { description: 'Explain the recovery flow', acceptance },
+      ];
+      const message = `Please make sure ${acceptance.toLowerCase()}`;
+      const completion = scriptedCompletion(
+        initialResponse(
+          needs,
+          phase === 'initial' ? message : 'How should we proceed?',
+        ),
+        ...(phase === 'continuation'
+          ? [continuationResponse(['need_1', 'need_2'], message)]
+          : []),
+      );
+      const ava = new AvaRolePlayer(
+        { task: 'Explain the flows.' },
+        completion.invoke,
+        noRetryWait,
+      );
+      if (phase === 'continuation') await ava.nextTurn();
+      const turn = await ava.nextTurn(
+        phase === 'initial' ? undefined : 'Please continue.',
+      );
+
+      assert.equal(turn.message, message);
+      assert.equal(turn.error, undefined);
+      assert.equal(completion.calls.length, phase === 'initial' ? 1 : 2);
+    });
+  }
+
   it('accepts task-model words without lexical rejection on both generated paths', async () => {
     const message =
       'Could you review the checklist, rubric, grading, remaining needs, and completion criteria?';
