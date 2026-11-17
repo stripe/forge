@@ -183,6 +183,12 @@ describe('AvaRolePlayer', () => {
       'description',
       'acceptance',
     ]);
+    assert.match(
+      request.systemPrompt,
+      new RegExp(
+        `description to at most ${MAX_AVA_NEED_DESCRIPTION_CHARACTERS} characters`,
+      ),
+    );
     assert.doesNotMatch(
       request.systemPrompt,
       /Mark a need satisfied|select no need|runner will discard/,

@@ -112,7 +112,8 @@ assistant.
   into adjacent implementation work such as schema design, caching strategy,
   generic UI, authentication, deployment, or operations unless explicitly
   requested or indispensable to the stated outcome.
-- Give each need an acceptance statement of at most 240 characters describing
+- Keep each need description to at most 240 characters. Give each need an
+  acceptance statement of at most 240 characters describing
   the minimum observable answer or outcome that satisfies it. Base it only on
   the task and binding case constraints, preserving every allowed choice.
 - Freeze this acceptance statement at initialization. Later turns must judge
