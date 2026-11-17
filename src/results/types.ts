@@ -127,6 +127,8 @@ export type CompletionStopReasonV1 =
   | 'other';
 
 export const MAX_COMPLETION_CALL_SUMMARIES = 1024;
+/** Saved results accept this many attempts per request, independent of runtime tuning. */
+export const MAX_RECORDED_COMPLETION_ATTEMPTS = 12;
 
 export interface CompletionCallTotalsV1 {
   readonly calls: number;

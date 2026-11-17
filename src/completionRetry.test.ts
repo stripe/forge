@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import {
   completionRetryDecision,
+  MAX_COMPLETION_ATTEMPTS,
   INITIAL_COMPLETION_RETRY_STATE,
   waitForCompletionRetry,
 } from './completionRetry.ts';
 import { CompletionInvocationError } from './contracts/completion.ts';
 import { observeCompletionFailure } from './providers/transportObservation.ts';
+import { MAX_RECORDED_COMPLETION_ATTEMPTS } from './results/types.ts';
 
 const failure = (status: number, retryAfter?: number) =>
   new CompletionInvocationError('http_error', 'HTTP failure', {
@@ -16,6 +18,10 @@ const failure = (status: number, retryAfter?: number) =>
   });
 
 describe('completion retry policy', () => {
+  it('fits inside the attempt bound owned by saved results', () => {
+    assert.ok(MAX_COMPLETION_ATTEMPTS <= MAX_RECORDED_COMPLETION_ATTEMPTS);
+  });
+
   it('gives rate limits their own budget and leaves the fallback budget intact', () => {
     let state = INITIAL_COMPLETION_RETRY_STATE;
     const delays = [];

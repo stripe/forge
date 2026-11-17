@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { assertBoundedJsonValue } from '../atif/parser.ts';
-import { MAX_COMPLETION_ATTEMPTS } from '../completionRetry.ts';
 import {
   completionTransportObservationSchema,
   MAX_COMPLETION_RETRY_WAIT_MS,
@@ -41,6 +40,7 @@ import {
   type InteractionArtifactV1,
   type JudgeEvidenceV1,
   MAX_MATCHED_TOOL_CALLS,
+  MAX_RECORDED_COMPLETION_ATTEMPTS,
   type RunResult,
   type SetupArtifactV1,
   type WorkspaceEvidenceV1,
@@ -231,7 +231,7 @@ const criterionResult = z
         error: z
           .object({
             type: z.enum(['parse_error', 'request_error']),
-            attempts: z.number().int().min(1).max(MAX_COMPLETION_ATTEMPTS),
+            attempts: z.number().int().min(1).max(MAX_RECORDED_COMPLETION_ATTEMPTS),
             message: z.string().trim().min(1).max(MAX_ERROR_MESSAGE_CHARACTERS),
           })
           .strict(),
@@ -509,7 +509,7 @@ const completionCallSummary = z
       .number()
       .int()
       .nonnegative()
-      .max(MAX_COMPLETION_ATTEMPTS - 1)
+      .max(MAX_RECORDED_COMPLETION_ATTEMPTS - 1)
       .optional(),
     retry_wait_ms: z
       .number()
