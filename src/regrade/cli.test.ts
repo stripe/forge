@@ -135,6 +135,35 @@ describe('forge regrade', () => {
       assert.doesNotMatch(text, new RegExp(key));
   });
 
+  it('exits 1 when a completed source run no longer verifies', async () => {
+    const root = await temporaryRoot('forge-regrade-cli-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    await fs.appendFile(path.join(source.runLocation, 'plan.json'), ' ');
+    const result = await invoke(
+      [
+        'regrade',
+        '--experiment-run',
+        source.experimentLocation,
+        '--judge-provider',
+        'anthropic',
+        '--judge-model',
+        'claude-opus-4-6',
+        '--output',
+        path.join(root, 'regraded'),
+      ],
+      [ORIGINAL_JUDGMENT],
+    );
+    assert.equal(result.code, 1, result.stderr);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.regraded, 0);
+    assert.equal(summary.not_completed, 0);
+    assert.equal(summary.failed.length, 1);
+    assert.equal(summary.failed[0].run_id, 'regrade-source');
+    assert.match(summary.failed[0].message, /failed artifact verification/);
+    assert.equal(result.judge.calls.length, 0);
+  });
+
   it('rejects missing judge settings and options that regrade does not accept', async () => {
     const missing = await invoke([
       'regrade',

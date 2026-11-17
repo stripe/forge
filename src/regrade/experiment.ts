@@ -36,7 +36,7 @@ export interface RegradeExperimentSummaryV1 {
   readonly not_judged: number;
   /** Selections with no completed run to regrade (pending or errored at the source). */
   readonly not_completed: number;
-  /** Completed runs that could not be regraded; their report rows are pending. */
+  /** Completed runs that could not be regraded, including those that no longer verify; their report rows are pending. */
   readonly failed: readonly {
     readonly run_id: string;
     readonly message: string;
@@ -107,9 +107,22 @@ export async function regradeExperimentRun(
     path.join(source, 'experiment.json'),
     'utf8',
   );
-  const attemptCounts = (
-    JSON.parse(checkpointBody) as { entries: { attempts: unknown[] }[] }
-  ).entries.map((entry) => entry.attempts.length);
+  const checkpointEntries = (
+    JSON.parse(checkpointBody) as {
+      entries: { attempts: { state: string }[] }[];
+    }
+  ).entries;
+  const attemptCounts = checkpointEntries.map((entry) => entry.attempts.length);
+  // A completed attempt that no longer verifies is inspected as errored; it is a failure to regrade,
+  // unlike a selection that never completed.
+  const corruptIndexes = new Set(
+    inspection.outcomes.flatMap((outcome, index) =>
+      outcome.state !== 'completed' &&
+      checkpointEntries[index]?.attempts.at(-1)?.state === 'completed'
+        ? [index]
+        : [],
+    ),
+  );
   await fs.mkdir(path.join(output, 'runs'), { recursive: true });
   const lock = await acquireOutputLock(output);
   try {
@@ -123,6 +136,11 @@ export async function regradeExperimentRun(
       outcome.state === 'completed' && outcome.artifact !== null ? [index] : [],
     );
     const outcomes = new Map<number, RegradeOutcome>();
+    for (const index of corruptIndexes)
+      outcomes.set(index, {
+        kind: 'failed',
+        message: 'The saved run failed artifact verification.',
+      });
     let next = 0;
     const worker = async () => {
       for (;;) {
@@ -262,7 +280,10 @@ export async function regradeExperimentRun(
       regraded: count('regraded'),
       reused: count('reused'),
       not_judged: count('not_judged'),
-      not_completed: inspection.outcomes.length - completedIndexes.length,
+      not_completed:
+        inspection.outcomes.length -
+        completedIndexes.length -
+        corruptIndexes.size,
       failed: Object.freeze(
         [...outcomes.entries()].flatMap(([index, outcome]) =>
           outcome.kind === 'failed'
