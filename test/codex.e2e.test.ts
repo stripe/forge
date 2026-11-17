@@ -501,7 +501,6 @@ function twoTurnProvider() {
           {
             description: 'Complete both parts',
             acceptance: 'Both requested parts are complete.',
-            status: 'remaining',
           },
         ],
         message: 'Complete part one.',
@@ -626,7 +625,6 @@ describe('Codex engine integration', () => {
             {
               description: 'Complete both parts',
               acceptance: 'Both requested parts are complete.',
-              status: 'remaining',
             },
           ],
           message: 'Complete part one.',

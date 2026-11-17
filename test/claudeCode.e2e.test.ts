@@ -229,7 +229,6 @@ it('runs the real Claude adapter through two turns, native selection, redaction,
           {
             description: 'Complete both parts',
             acceptance: 'Both requested parts are complete.',
-            status: 'remaining',
           },
         ],
         message: 'Do part one.',

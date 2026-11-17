@@ -81,7 +81,6 @@ const InitialNeedResponse = z
       .trim()
       .min(1)
       .max(MAX_AVA_NEED_ACCEPTANCE_CHARACTERS),
-    status: z.enum(['remaining', 'satisfied']),
   })
   .strict();
 
@@ -126,12 +125,8 @@ function initializationResponseFormat(
                 maxLength: MAX_AVA_NEED_ACCEPTANCE_CHARACTERS,
                 pattern: '\\S',
               },
-              status: {
-                type: 'string',
-                enum: ['remaining', 'satisfied'],
-              },
             },
-            required: ['description', 'acceptance', 'status'],
+            required: ['description', 'acceptance'],
             additionalProperties: false,
           },
         },

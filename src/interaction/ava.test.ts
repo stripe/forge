@@ -53,7 +53,6 @@ function completionResponse(content: string) {
 function initialResponse(
   needs: Array<{
     description: string;
-    status: 'remaining' | 'satisfied';
     acceptance?: string;
   }>,
   message: string,
@@ -78,12 +77,10 @@ const TWO_NEEDS = [
   {
     description: 'Understand the desired checkout experience',
     acceptance: 'The checkout flow is explained at a design level.',
-    status: 'remaining' as const,
   },
   {
     description: 'Confirm the implementation was verified',
     acceptance: 'The assistant reports a verification result.',
-    status: 'remaining' as const,
   },
 ];
 
@@ -95,7 +92,7 @@ describe('AvaRolePlayer', () => {
   it('initializes bounded private needs with a strict structured request', async () => {
     const completion = scriptedCompletion(
       initialResponse(
-        TWO_NEEDS.map((need) => ({ ...need, status: 'satisfied' })),
+        TWO_NEEDS,
         'What should the checkout feel like?',
       ),
     );
@@ -182,8 +179,13 @@ describe('AvaRolePlayer', () => {
       schema.properties.user_needs.items.properties.acceptance.maxLength,
       MAX_AVA_NEED_ACCEPTANCE_CHARACTERS,
     );
-    assert.ok(
-      schema.properties.user_needs.items.required.includes('acceptance'),
+    assert.deepEqual(schema.properties.user_needs.items.required, [
+      'description',
+      'acceptance',
+    ]);
+    assert.doesNotMatch(
+      request.systemPrompt,
+      /Mark a need satisfied|select no need|runner will discard/,
     );
     assert.equal(
       schema.properties.message.maxLength,
@@ -203,7 +205,6 @@ describe('AvaRolePlayer', () => {
           {
             description: need.description,
             acceptance: need.acceptance,
-            status: 'remaining',
           },
         ],
       }),
@@ -266,7 +267,6 @@ describe('AvaRolePlayer', () => {
       const need = {
         description: 'Complete the requested work',
         acceptance: 'The requested output is present.',
-        status: 'remaining' as const,
       };
       const completion = scriptedCompletion(
         JSON.stringify({
@@ -329,7 +329,6 @@ describe('AvaRolePlayer', () => {
             user_needs: [
               {
                 description: 'Complete the work',
-                status: 'remaining',
                 ...(acceptance === undefined ? {} : { acceptance }),
               },
             ],
@@ -391,7 +390,6 @@ describe('AvaRolePlayer', () => {
           needs.map(({ description, acceptance }) => ({
             description,
             acceptance,
-            status: 'remaining',
           })),
           phase === 'initial' ? message : 'How should we proceed?',
         );
@@ -455,7 +453,6 @@ describe('AvaRolePlayer', () => {
       const need = {
         description: 'Review the result',
         acceptance: 'A review is complete.',
-        status: 'remaining' as const,
         [field]: 'ok',
       };
       const message = 'Could you look at the result?';
@@ -510,9 +507,8 @@ describe('AvaRolePlayer', () => {
         const needs = [
           {
             description: 'Choose the desired outcome',
-            status: 'remaining' as const,
           },
-          { description, status: 'remaining' as const },
+          { description },
         ];
         const completion = scriptedCompletion(
           initialResponse(
@@ -555,10 +551,9 @@ describe('AvaRolePlayer', () => {
     const completion = scriptedCompletion(
       initialResponse(
         [
-          { description: 'Choose the desired outcome', status: 'remaining' },
+          { description: 'Choose the desired outcome' },
           {
             description: 'Review  the\tcomplete\ncheckout flow',
-            status: 'remaining',
           },
         ],
         'Could you REVIEW THE COMPLETE CHECKOUT FLOW?',
@@ -582,11 +577,10 @@ describe('AvaRolePlayer', () => {
     const completion = scriptedCompletion(
       initialResponse(
         [
-          { description: 'Choose the desired outcome', status: 'remaining' },
+          { description: 'Choose the desired outcome' },
           {
             description:
               'Review payment confirmation for the whole checkout flow',
-            status: 'remaining',
           },
         ],
         message,
@@ -766,8 +760,8 @@ describe('AvaRolePlayer', () => {
         'duplicate needs',
         initialResponse(
           [
-            { description: 'Same need', status: 'remaining' },
-            { description: 'same need', status: 'remaining' },
+            { description: 'Same need' },
+            { description: 'same need' },
           ],
           'Question?',
         ),
@@ -777,7 +771,6 @@ describe('AvaRolePlayer', () => {
         initialResponse(
           Array.from({ length: MAX_AVA_NEEDS + 1 }, (_, index) => ({
             description: `Outcome ${index + 1}`,
-            status: 'remaining' as const,
           })),
           'Question?',
         ),
@@ -788,7 +781,6 @@ describe('AvaRolePlayer', () => {
           [
             {
               description: 'x'.repeat(MAX_AVA_NEED_DESCRIPTION_CHARACTERS + 1),
-              status: 'remaining',
             },
           ],
           'Question?',
@@ -887,7 +879,7 @@ describe('AvaRolePlayer', () => {
           ],
           message: 'Hi',
         }),
-        'Ava response did not match the required schema at response.user_needs[0].status (invalid_value).',
+        'Ava response did not match the required schema at response.user_needs[0] (unrecognized_keys).',
       ],
       [
         JSON.stringify({
@@ -895,7 +887,6 @@ describe('AvaRolePlayer', () => {
             {
               description: 'safe',
               acceptance: 'The requested outcome is complete.',
-              status: 'remaining',
             },
           ],
           message: 'Hi',

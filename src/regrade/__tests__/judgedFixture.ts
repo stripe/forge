@@ -79,7 +79,6 @@ export async function runJudgedFixture(root: string) {
           {
             description: 'Create the release summary',
             acceptance: 'The file contains the supplied status sentence.',
-            status: 'remaining',
           },
         ],
       }),

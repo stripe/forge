@@ -59,7 +59,6 @@ describe('unified live end-to-end suite', () => {
           {
             description: 'Receive HELLO',
             acceptance: 'The answer is exactly HELLO.',
-            status: 'remaining',
           },
         ],
         message: 'Please reply with HELLO.',

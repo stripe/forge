@@ -83,7 +83,6 @@ function createCredentialExecution(engine: ForgeEngine = defaultForgeEngine) {
           {
             description: 'Complete the task',
             acceptance: 'The task is complete.',
-            status: 'remaining',
           },
         ],
       });
@@ -94,7 +93,6 @@ function createCredentialExecution(engine: ForgeEngine = defaultForgeEngine) {
             {
               description: 'Complete the task',
               acceptance: 'The task is complete.',
-              status: 'remaining',
             },
           ],
           message: 'Complete the task.',

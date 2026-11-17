@@ -52,7 +52,6 @@ describe('multi-turn CLI end to end', () => {
               {
                 description: 'Complete the task',
                 acceptance: 'The task is reported as done.',
-                status: 'remaining',
               },
             ],
             message: 'Please complete the task.',
@@ -229,7 +228,6 @@ describe('multi-turn CLI end to end', () => {
             {
               description: 'Create the requested release summary',
               acceptance: 'The file contains the supplied status sentence.',
-              status: 'remaining',
             },
           ],
         }),

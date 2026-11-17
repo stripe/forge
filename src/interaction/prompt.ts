@@ -117,15 +117,11 @@ assistant.
   the task and binding case constraints, preserving every allowed choice.
 - Freeze this acceptance statement at initialization. Later turns must judge
   against it without adding conditions or demanding more detail.
-- Mark a need satisfied only when the conversation already covers it. With no
-  prior coding-assistant response, every need must remain.
 ${
   needsOnly
     ? '- Return only the private needs. The runner sends the configured opening; do not generate a message.'
-    : `- Select exactly one remaining need to pursue in the message. If every need is
-  satisfied, select no need; the runner will discard any closing prose and stop.
-- Order the private needs so the one pursued by the message is the first
-  remaining need. The runner derives the focus from that order.`
+    : `- Select exactly one need to pursue in the message, and order the private needs
+  so that it is first. The runner derives the focus from that order.`
 }`;
 }
 

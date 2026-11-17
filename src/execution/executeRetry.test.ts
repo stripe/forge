@@ -106,7 +106,6 @@ describe('retry evidence through executeEval', () => {
             {
               description: 'Finish the task',
               acceptance: 'The task is done.',
-              status: 'remaining',
             },
           ],
           message: 'Please do the task.',

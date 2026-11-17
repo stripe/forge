@@ -206,7 +206,6 @@ export async function runCodexPluginIntegrationSuite({
               {
                 description: 'Complete two turns',
                 acceptance: 'The fixture has run and been checked again.',
-                status: 'remaining',
               },
             ],
             message: 'Run the fixture once.',

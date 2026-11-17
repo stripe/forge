@@ -18,7 +18,6 @@ function initialResponse(
     user_needs: descriptions.map((description) => ({
       description,
       acceptance: 'The requested outcome is complete.',
-      status: 'remaining',
     })),
     message,
   });
@@ -599,8 +598,9 @@ describe('runConversation', () => {
         result.failure?.errorType,
         typeof response === 'string' ? 'parse_error' : 'request_error',
       );
-      assert.equal(result.failure?.attempts, 3);
-      assert.equal(completion.calls.length, 3);
+      const attempts = typeof response === 'string' ? 3 : 4;
+      assert.equal(result.failure?.attempts, attempts);
+      assert.equal(completion.calls.length, attempts);
       assert.equal(result.avaAudit.needs, null);
       assert.equal(result.avaAudit.decisions[0]!.message, '');
       assert.equal(result.avaAudit.decisions[0]!.codingAgentInvoked, false);

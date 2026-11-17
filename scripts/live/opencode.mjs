@@ -210,7 +210,6 @@ export async function runOpenCodeIntegrationSuite(options) {
                   description: 'Create and verify the output',
                   acceptance:
                     'The output file exists and its contents have been checked.',
-                  status: 'remaining',
                 },
               ],
               message: 'Create answer.txt containing complete.',

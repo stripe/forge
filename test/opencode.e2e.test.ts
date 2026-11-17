@@ -104,7 +104,6 @@ describe('OpenCode engine integration', () => {
                 {
                   description: 'Complete both parts',
                   acceptance: 'Both requested parts are complete.',
-                  status: 'remaining',
                 },
               ],
               message: 'Do part one',

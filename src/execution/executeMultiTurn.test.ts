@@ -96,7 +96,6 @@ describe('executeEval multi-turn and judging integration', () => {
               {
                 description: 'Create the answer file',
                 acceptance: 'The requested answer file is complete.',
-                status: 'remaining',
               },
             ],
           });
@@ -221,7 +220,6 @@ describe('executeEval multi-turn and judging integration', () => {
             {
               description: 'Deliver an answer in the specified file',
               acceptance: 'The requested answer file is complete.',
-              status: 'remaining',
             },
           ],
           message: 'Please produce the requested answer file.',
@@ -450,7 +448,6 @@ describe('executeEval multi-turn and judging integration', () => {
             {
               description: 'Complete both parts',
               acceptance: 'Both requested parts are complete.',
-              status: 'remaining',
             },
           ],
           message: firstUser,
@@ -1136,7 +1133,6 @@ describe('executeEval multi-turn and judging integration', () => {
             {
               description: 'Finish both steps',
               acceptance: 'Both requested steps are complete.',
-              status: 'remaining',
             },
           ],
           message: 'Please do the first step.',
