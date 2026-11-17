@@ -1003,15 +1003,14 @@ rule in initialization and continuation prompts forbids revealing, quoting,
 copying, or summarizing private IDs, descriptions, acceptance statements, the
 checklist, or remaining needs. Ava must speak as a developer in its own words
 about the focused outcome. Runtime validation rejects internal need ID tokens
-(`need_` followed by digits as a whole word) and verbatim copies of full
-non-focused need descriptions that have at least four whitespace-separated
-words and 24 characters. Description matching ignores case and normalizes
-whitespace to single spaces before applying both thresholds and comparing.
-Ordinary checklist/grading words and shorter descriptions are prompt-only.
-Acceptance statements and focused descriptions are also prompt-only. A
-paraphrase or a short private value can leak undetected, as can acceptance
-text; the shared prompt rule covers these cases. Schema, size, and
-single-message format checks remain. A false disclosure rejection can exhaust
+(`need_` followed by digits as a whole word) and verbatim copies of a
+non-focused need's full description or full acceptance statement that have at
+least four whitespace-separated words and 24 characters. Matching ignores case
+and normalizes whitespace to single spaces before applying both thresholds and
+comparing. Ordinary checklist/grading words and shorter private text are
+prompt-only, as is the focused need's own text. A paraphrase or a short private
+value can leak undetected; the shared prompt rule covers these cases.
+Schema, size, and single-message format checks remain. A false disclosure rejection can exhaust
 retries and fail the eval, so the runtime does not compare other private text.
 Ava initializes before the first agent answer unless the configured opening is
 terminal. With a nonterminal configured initial prompt, a needs-only completion

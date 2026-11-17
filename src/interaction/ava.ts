@@ -24,8 +24,8 @@ export const MAX_AVA_NEED_DESCRIPTION_CHARACTERS = 240;
 export const MAX_AVA_NEED_ACCEPTANCE_CHARACTERS = 240;
 export const MAX_AVA_MESSAGE_CHARACTERS = 500;
 
-const MIN_AVA_DESCRIPTION_MATCH_WORDS = 4;
-const MIN_AVA_DESCRIPTION_MATCH_CHARACTERS = 24;
+const MIN_AVA_PRIVATE_MATCH_WORDS = 4;
+const MIN_AVA_PRIVATE_MATCH_CHARACTERS = 24;
 
 const NEVER_ABORTED_SIGNAL = new AbortController().signal;
 
@@ -249,13 +249,15 @@ function validateGeneratedMessage(
   const normalizedMessage = normalizeAvaText(trimmed);
   for (const need of needs) {
     if (need.id === focusedNeedId) continue;
-    const description = normalizeAvaText(need.description);
-    if (
-      description.length >= MIN_AVA_DESCRIPTION_MATCH_CHARACTERS &&
-      description.split(' ').length >= MIN_AVA_DESCRIPTION_MATCH_WORDS &&
-      normalizedMessage.includes(description)
-    ) {
-      throw new AvaResponseError('Ava exposed a non-focused private need.');
+    for (const text of [need.description, need.acceptance]) {
+      const privateText = normalizeAvaText(text);
+      if (
+        privateText.length >= MIN_AVA_PRIVATE_MATCH_CHARACTERS &&
+        privateText.split(' ').length >= MIN_AVA_PRIVATE_MATCH_WORDS &&
+        normalizedMessage.includes(privateText)
+      ) {
+        throw new AvaResponseError('Ava exposed a non-focused private need.');
+      }
     }
   }
   return trimmed;

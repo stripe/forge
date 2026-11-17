@@ -368,9 +368,7 @@ describe('AvaRolePlayer', () => {
   ] as const) {
     for (const field of ['id', 'description', 'acceptance'] as const) {
       const rejectsDisclosure =
-        field === 'id' ||
-        (field === 'description' &&
-          (phase === 'non-focused' || phase === 'resolved'));
+        field === 'id' || phase === 'non-focused' || phase === 'resolved';
       it(`${rejectsDisclosure ? 'rejects' : 'accepts'} ${phase} private ${field} text under the narrow guard`, async () => {
         const needs = [
           {
