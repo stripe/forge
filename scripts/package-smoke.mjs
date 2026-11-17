@@ -67,6 +67,7 @@ try {
       import * as cli from '@stripe/forge/cli';
       import * as experiment from '@stripe/forge/experiment';
       import * as experimentCli from '@stripe/forge/experiment/cli';
+      import * as regrade from '@stripe/forge/regrade';
       import * as claude from '@stripe/forge/agents/claude-code';
       import * as codex from '@stripe/forge/agents/codex';
       import * as opencode from '@stripe/forge/agents/opencode';
@@ -153,6 +154,10 @@ try {
       for (const removed of ['@stripe/forge/campaign', '@stripe/forge/campaign/cli']) {
         await assert.rejects(import(removed), {code: 'ERR_PACKAGE_PATH_NOT_EXPORTED'});
       }
+      assert.equal(typeof regrade.regradeCompletedRun, 'function');
+      assert.equal(typeof regrade.regradeExperimentRun, 'function');
+      assert.equal(typeof regrade.judgeInputFromSavedRun, 'function');
+      assert.equal('regradeCompletedRun' in forge, false);
       assert.equal(typeof claude.createClaudeCodeAdapter, 'function');
       assert.equal(typeof opencode.createOpenCodeAdapter, 'function');
       assert.equal(typeof opencode.parseOpenCodeStream, 'function');

@@ -632,6 +632,44 @@ When using Forge as a library, you can
 [supply your own Dockerfile](docs/architecture.md#custom-docker-images) while
 reusing its container lifecycle. The CLI uses the packaged image.
 
+### Regrade saved runs
+
+`forge regrade` judges a saved experiment run again with a different judge,
+without re-running any coding agent or Ava turn. Each completed run is verified
+first. Its transcript is projected from the saved `trajectory.json`, and its
+workspace text comes from the saved `judge-evidence.json`, so the new judge
+receives the same evidence and prompt as the original judge:
+
+```sh
+npx --no-install forge regrade \
+  --experiment-run ./results/experiments/EXPERIMENT_RUN_ID \
+  --judge-provider anthropic --judge-model claude-opus-4-6 \
+  --output ./regrades/opus-4-6 --jobs 4
+```
+
+The source experiment run is only read; `--output` must be a new location
+outside it. Each regrade is written to `runs/<run-id>.json` there, with the
+judge, the new evaluation, its completion calls, and digests of the saved
+inputs. `report.json` aggregates the regraded evaluations with the standard
+report format, and `regrade.json` summarizes the invocation. In the regrade
+report, each regraded row's `regrade_path` (relative to the report's directory)
+points to the evaluation behind its scores. Its `result_path` still points to
+the original execution, relative to the report's `result_root`, which is the
+source experiment run. Rerunning the same command reuses regrades for the same
+judge and committed result, so an interrupted regrade can be continued. An
+output that already holds regrades from another judge reports those runs as
+failed instead of mixing judges. Only one regrade can write to an output at a
+time: a second concurrent invocation fails, naming the output, instead of
+interleaving its results.
+
+Deterministic file checks are not re-run, because the workspace is gone after
+a run; each regrade keeps the run's original check results. The judge sees
+only the bounded workspace excerpts captured at run time. Runs without judging
+criteria keep their checks-only evaluation. Runs that could not be regraded
+appear as pending in the regrade report, and the command exits with status 1.
+Library hosts can call `regradeCompletedRun` and `regradeExperimentRun` from
+`@stripe/forge/regrade`.
+
 ## Development
 
 Development requires Node.js 22.12 or newer. From a source checkout with
