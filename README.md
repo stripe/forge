@@ -691,7 +691,9 @@ for the same judge and committed result, so an interrupted regrade can be
 continued. An output that already holds regrades from another judge reports
 those runs as failed instead of mixing judges. Only one regrade can write to an
 output at a time: a second concurrent invocation fails, naming the output,
-instead of interleaving its results.
+instead of interleaving its results. A fatal worker failure stops new scheduling and
+requests cancellation of in-flight judging. The invocation waits for every
+worker to settle before releasing the output lock and reporting that failure.
 
 Deterministic file checks are not re-run, because the workspace is gone
 after a run; each regrade keeps the run's original check results. The judge

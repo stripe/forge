@@ -61,7 +61,8 @@ type RegradeOutcome =
  * and add `regrade_path` (the evaluation behind their scores, under the
  * report's directory). One invocation at a time may write an output: an
  * exclusive lock is held from the first read of saved regrades until
- * `regrade.json` is written.
+ * `regrade.json` is written. On a fatal worker failure, peers are cancelled
+ * and all workers settle before the failure is reported and the lock released.
  */
 export async function regradeExperimentRun(
   input: {
@@ -123,19 +124,31 @@ export async function regradeExperimentRun(
       outcome.state === 'completed' && outcome.artifact !== null ? [index] : [],
     );
     const outcomes = new Map<number, RegradeOutcome>();
+    const peerCancellation = new AbortController();
+    const workerSignal = AbortSignal.any([signal, peerCancellation.signal]);
+    let failed = false;
+    let firstError: unknown;
     let next = 0;
     const worker = async () => {
-      for (;;) {
-        signal.throwIfAborted();
-        const index = completedIndexes[next++];
-        if (index === undefined) return;
-        const outcome = inspection.outcomes[index]!;
-        const result = await regradeOne(
-          outcome.run_id!,
-          outcome.artifact!.location,
-        );
-        outcomes.set(index, result);
-        input.progress?.({ run_id: outcome.run_id!, state: result.kind });
+      try {
+        while (!failed) {
+          workerSignal.throwIfAborted();
+          const index = completedIndexes[next++];
+          if (index === undefined) return;
+          const outcome = inspection.outcomes[index]!;
+          const result = await regradeOne(
+            outcome.run_id!,
+            outcome.artifact!.location,
+          );
+          outcomes.set(index, result);
+          input.progress?.({ run_id: outcome.run_id!, state: result.kind });
+        }
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          firstError = error;
+          peerCancellation.abort(error);
+        }
       }
     };
     const regradeOne = async (
@@ -164,7 +177,7 @@ export async function regradeExperimentRun(
           {
             location,
             judge: input.judge,
-            signal,
+            signal: workerSignal,
             now,
             ...(input.completionRetry === undefined
               ? {}
@@ -179,7 +192,7 @@ export async function regradeExperimentRun(
         await writeAtomic(file, `${JSON.stringify(regrade, null, 2)}\n`);
         return { kind: 'regraded', regrade };
       } catch (error) {
-        if (signal.aborted) throw error;
+        if (workerSignal.aborted) throw error;
         return {
           kind: 'failed',
           message: (error instanceof Error
@@ -192,6 +205,9 @@ export async function regradeExperimentRun(
     await Promise.all(
       Array.from({ length: Math.min(jobs, completedIndexes.length) }, worker),
     );
+    // Workers catch fatal failures and cancel peers, so this wait drains every
+    // in-flight judge and write before the outer finally releases the lock.
+    if (failed) throw firstError;
 
     const runs: ExperimentRunReportRunV1[] = [];
     for (const [index, outcome] of inspection.outcomes.entries()) {
