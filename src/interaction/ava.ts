@@ -320,14 +320,11 @@ export class AvaRolePlayer {
     const outcome = await retryCompletion<AvaTurn>(
       this.#signal,
       this.#executionOptions,
-      async (attempt) => {
+      async (attempt, context) => {
         throwIfAborted(this.#signal);
         let raw: string;
         try {
-          const response = await this.#completion({
-            ...request,
-            retryOrdinal: attempt - 1,
-          });
+          const response = await this.#completion(request, context);
           if (!response || typeof response.content !== 'string') {
             throw new TypeError('Completion returned invalid content.');
           }

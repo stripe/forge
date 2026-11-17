@@ -141,9 +141,15 @@ export async function regradeCompletedRun(
   });
   const criteria = await judgeCriteria(
     { ...judgeInputFromSavedRun({ plan, trajectory, judgeEvidence }), signal },
-    async (request) =>
-      (await completions.invoke('judge', request, request.signal ?? signal))
-        .content,
+    async (request, attempt) =>
+      (
+        await completions.invoke(
+          'judge',
+          request,
+          request.signal ?? signal,
+          attempt,
+        )
+      ).content,
     {
       redactionSecrets: completions.secrets,
       onRetryDecision: completions.recordRetryDecision,

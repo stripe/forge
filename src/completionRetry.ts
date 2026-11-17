@@ -35,6 +35,17 @@ export const INITIAL_COMPLETION_RETRY_STATE: CompletionRetryState =
     longRetries: 0,
   });
 
+/**
+ * One attempt of a logical completion request. The driver states the ordinal;
+ * the completion runtime reports the sequence of the call the attempt made, so
+ * a retry decision attaches to that call even when the reply parsed.
+ */
+export interface CompletionAttemptContext {
+  /** Zero for the first attempt of a request. */
+  readonly retryOrdinal: number;
+  sequence?: number;
+}
+
 export interface CompletionRetryOptions {
   readonly now?: () => number;
   readonly random?: () => number;
@@ -48,7 +59,7 @@ export interface CompletionRetryOptions {
     signal: AbortSignal,
   ) => Promise<void>;
   readonly onRetryDecision?: (
-    error: unknown,
+    sequence: number,
     decision: CompletionRetryDecision,
   ) => void;
 }
@@ -159,11 +170,15 @@ export type CompletionRetryResult<T> =
 export async function retryCompletion<T>(
   signal: AbortSignal,
   options: CompletionRetryOptions,
-  attempt: (attemptNumber: number) => Promise<CompletionAttemptOutcome<T>>,
+  attempt: (
+    attemptNumber: number,
+    context: CompletionAttemptContext,
+  ) => Promise<CompletionAttemptOutcome<T>>,
 ): Promise<CompletionRetryResult<T>> {
   let state = INITIAL_COMPLETION_RETRY_STATE;
   for (let attempts = 1; ; attempts += 1) {
-    const outcome = await attempt(attempts);
+    const context: CompletionAttemptContext = { retryOrdinal: attempts - 1 };
+    const outcome = await attempt(attempts, context);
     if (outcome.ok) return outcome;
     const next = completionRetryDecision(
       state,
@@ -173,7 +188,7 @@ export async function retryCompletion<T>(
     );
     state = next.state;
     const waitBeforeRetry = options.waitBeforeRetry;
-    await waitForCompletionRetry(outcome.error, next.decision, signal, {
+    await waitForCompletionRetry(context.sequence, next.decision, signal, {
       ...options,
       ...(options.sleep !== undefined || waitBeforeRetry === undefined
         ? {}
@@ -187,13 +202,13 @@ export async function retryCompletion<T>(
 }
 
 export async function waitForCompletionRetry(
-  error: unknown,
+  sequence: number | undefined,
   decision: CompletionRetryDecision,
   signal: AbortSignal,
   options: CompletionRetryOptions,
 ): Promise<void> {
   if (decision.disposition === 'exhausted') {
-    notifyRetryDecision(error, decision, options);
+    notifyRetryDecision(sequence, decision, options);
     return;
   }
   const now = options.now ?? Date.now;
@@ -211,7 +226,7 @@ export async function waitForCompletionRetry(
       const elapsed = start === undefined ? Number.NaN : now() - start;
       if (Number.isFinite(elapsed) && elapsed >= 0) {
         notifyRetryDecision(
-          error,
+          sequence,
           {
             ...decision,
             wait_ms: Math.min(decision.wait_ms, Math.round(elapsed)),
@@ -226,12 +241,13 @@ export async function waitForCompletionRetry(
 }
 
 function notifyRetryDecision(
-  error: unknown,
+  sequence: number | undefined,
   decision: CompletionRetryDecision,
   options: CompletionRetryOptions,
 ): void {
+  if (sequence === undefined) return;
   try {
-    void Promise.resolve(options.onRetryDecision?.(error, decision)).catch(
+    void Promise.resolve(options.onRetryDecision?.(sequence, decision)).catch(
       () => undefined,
     );
   } catch {

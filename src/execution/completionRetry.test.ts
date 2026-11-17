@@ -93,8 +93,8 @@ describe('completion retry integration', () => {
       });
       const result = await judgeCriteria(
         { transcript, criteria: ['Done'], signal },
-        async (request) =>
-          (await observed.invoke('judge', request, request.signal)).content,
+        async (request, attempt) =>
+          (await observed.invoke('judge', request, request.signal, attempt)).content,
         {
           now: () => elapsed,
           random: () => 1,
@@ -110,7 +110,7 @@ describe('completion retry integration', () => {
       assert.equal(observed.calls[0]!.http_status, 429);
       assert.equal(observed.calls[0]!.request_id, 'request_synthetic');
       assert.equal(observed.calls[0]!.provider_error_code, 'rate_limit_error');
-      assert.equal(observed.calls[0]!.disposition, 'rate_limit_retry');
+      assert.equal(observed.calls[0]!.retry?.decision, 'rate_limit_retry');
       assert.equal(observed.calls.at(-1)!.status, 'succeeded');
       assert.deepEqual(
         observed.calls.map((call) => call.retry_ordinal),
@@ -124,8 +124,8 @@ describe('completion retry integration', () => {
     const { prepared } = await runtime([limited(503, 23000), answer, answer]);
     const judgments = await judgeCriteria(
       { transcript, criteria: ['First', 'Second'], signal },
-      async (request) =>
-        (await prepared.invoke('judge', request, request.signal)).content,
+      async (request, attempt) =>
+          (await prepared.invoke('judge', request, request.signal, attempt)).content,
       {
         now: () => elapsed,
         random: () => 1,
@@ -146,6 +146,39 @@ describe('completion retry integration', () => {
     assert.equal(prepared.totals.rate_limit_wait_ms, 23000);
   });
 
+  it('records the retry decision on a call whose reply failed to parse', async () => {
+    let elapsed = 0;
+    const { prepared, scripted } = await runtime([
+      { ...answer, content: '{"results":[' },
+      answer,
+    ]);
+    const results = await judgeCriteria(
+      { transcript, criteria: ['Done'], signal },
+      async (request, attempt) =>
+        (await prepared.invoke('judge', request, request.signal, attempt))
+          .content,
+      {
+        now: () => elapsed,
+        random: () => 1,
+        sleep: async (ms) => {
+          elapsed += ms;
+        },
+        onRetryDecision: prepared.recordRetryDecision,
+      },
+    );
+    assert.equal(results[0]!.passed, true);
+    assert.equal(prepared.calls[0]!.status, 'succeeded');
+    assert.deepEqual(prepared.calls[0]!.retry, {
+      decision: 'retry',
+      wait_ms: 1000,
+    });
+    assert.equal(prepared.calls[1]!.retry, undefined);
+    assert.equal(prepared.totals.rate_limit_wait_ms, 0);
+    // The retry ordinal is persisted evidence, never part of the provider request.
+    for (const call of scripted.calls)
+      assert.equal('retryOrdinal' in call.request, false);
+  });
+
   it('commits the same Ava error outcome when the rate-limit budget runs out', async () => {
     let elapsed = 0;
     const { prepared, scripted } = await runtime(
@@ -154,7 +187,8 @@ describe('completion retry integration', () => {
     );
     const turn = await new AvaRolePlayer(
       { task: 'Do the task.', signal },
-      (request) => prepared.invoke('role_player', request, request.signal),
+      (request, attempt) =>
+        prepared.invoke('role_player', request, request.signal, attempt),
       {
         now: () => elapsed,
         random: () => 1,
@@ -167,7 +201,7 @@ describe('completion retry integration', () => {
     assert.equal(turn.error?.errorType, 'request_error');
     assert.equal(turn.error?.attempts, 7);
     assert.equal(scripted.calls.length, 7);
-    assert.equal(prepared.calls.at(-1)!.disposition, 'exhausted');
+    assert.equal(prepared.calls.at(-1)!.retry?.decision, 'exhausted');
     assert.equal(prepared.totals.rate_limit_wait_ms, 126000);
   });
 
@@ -183,8 +217,8 @@ describe('completion retry integration', () => {
       );
       const results = await judgeCriteria(
         { transcript, criteria: ['Done'], signal },
-        async (request) =>
-          (await prepared.invoke('judge', request, request.signal)).content,
+        async (request, attempt) =>
+          (await prepared.invoke('judge', request, request.signal, attempt)).content,
         {
           now: () => elapsed,
           random: () => 1,
@@ -198,7 +232,7 @@ describe('completion retry integration', () => {
       assert.equal(results[0]!.error?.attempts, attempts);
       assert.equal(elapsed, elapsedMs);
       assert.equal(prepared.totals.rate_limit_wait_ms, 0);
-      assert.equal(prepared.calls.at(-1)!.disposition, 'exhausted');
+      assert.equal(prepared.calls.at(-1)!.retry?.decision, 'exhausted');
     });
   }
 
@@ -228,8 +262,9 @@ describe('completion retry integration', () => {
       if (purpose === 'judge') {
         const results = await judgeCriteria(
           { transcript, criteria: ['Done'], signal },
-          async (request) =>
-            (await prepared.invoke(purpose, request, request.signal)).content,
+          async (request, attempt) =>
+            (await prepared.invoke(purpose, request, request.signal, attempt))
+              .content,
           options,
         );
         assert.equal(results[0]!.error?.attempts, 12);
@@ -238,7 +273,8 @@ describe('completion retry integration', () => {
       } else {
         const turn = await new AvaRolePlayer(
           { task: 'Do the task.', signal },
-          (request) => prepared.invoke(purpose, request, request.signal),
+          (request, attempt) =>
+        prepared.invoke(purpose, request, request.signal, attempt),
           options,
         ).nextTurn();
         assert.equal(turn.error?.attempts, 12);
@@ -249,7 +285,7 @@ describe('completion retry integration', () => {
       );
       assert.equal(prepared.calls.length, 12);
       assert.equal(prepared.calls.at(-1)!.retry_ordinal, 11);
-      assert.equal(prepared.calls.at(-1)!.disposition, 'exhausted');
+      assert.equal(prepared.calls.at(-1)!.retry?.decision, 'exhausted');
       assert.equal(prepared.totals.rate_limit_wait_ms, 126000);
     });
   }
@@ -261,10 +297,11 @@ describe('completion retry integration', () => {
       ),
     );
     for (let index = 0; index < MAX_COMPLETION_CALL_SUMMARIES + 2; index += 1) {
+      const attempt = { retryOrdinal: 0 } as { retryOrdinal: number; sequence?: number };
       try {
-        await prepared.invoke('judge', { messages: [] }, signal);
-      } catch (error) {
-        prepared.recordRetryDecision(error, {
+        await prepared.invoke('judge', { messages: [] }, signal, attempt);
+      } catch {
+        prepared.recordRetryDecision(attempt.sequence!, {
           disposition: 'rate_limit_retry',
           wait_ms: 1000,
         });
@@ -373,7 +410,8 @@ describe('built-in provider output retries through the completion runtime', () =
           if (purpose === 'role_player') {
             const turn = await new AvaRolePlayer(
               { task: 'Do the task.', signal },
-              (request) => prepared.invoke(purpose, request, request.signal),
+              (request, attempt) =>
+        prepared.invoke(purpose, request, request.signal, attempt),
               options,
             ).nextTurn();
             assert.equal(turn.error?.errorType, expectedError);
@@ -381,9 +419,15 @@ describe('built-in provider output retries through the completion runtime', () =
           } else {
             const results = await judgeCriteria(
               { transcript, criteria: ['Done'], signal },
-              async (request) =>
-                (await prepared.invoke(purpose, request, request.signal))
-                  .content,
+              async (request, attempt) =>
+                (
+                  await prepared.invoke(
+                    purpose,
+                    request,
+                    request.signal,
+                    attempt,
+                  )
+                ).content,
               options,
             );
             assert.equal(results[0]!.error?.type, expectedError);
@@ -408,7 +452,7 @@ describe('built-in provider output retries through the completion runtime', () =
             prepared.calls.map((call) => call.retry_ordinal),
             Array.from({ length: attempts }, (_, index) => index),
           );
-          assert.equal(prepared.calls.at(-1)!.disposition, 'exhausted');
+          assert.equal(prepared.calls.at(-1)!.retry?.decision, 'exhausted');
           assert.equal(prepared.totals.rate_limit_wait_ms, 0);
           if (quotaExhausted)
             assert.equal(

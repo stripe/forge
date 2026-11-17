@@ -1,3 +1,4 @@
+import type { CompletionAttemptContext } from '../completionRetry.ts';
 import type {
   CompletionMessage,
   CompletionResponse,
@@ -21,9 +22,9 @@ export interface InteractionCompletionRequest {
   readonly maxTokens: number;
   readonly responseSchema: StrictCompletionResponseSchema;
   readonly signal: AbortSignal;
-  readonly retryOrdinal?: number;
 }
 
 export type InteractionCompletionInvoker = (
   request: InteractionCompletionRequest,
+  attempt?: CompletionAttemptContext,
 ) => Promise<CompletionResponse>;

@@ -1100,11 +1100,14 @@ validated headers and status. Cleanup does not wait for stream cancellation.
 
 `result.json.completion_calls` retains the first 1,024 provider calls per
 eval, including failures before a later success. Optional `http_status`,
-`request_id`, `provider_error_code`, `retry_ordinal`, `retry_wait_ms`, and
-`disposition` fields record each subattempt. Ordinals start at zero for each
-Ava decision or judge criterion. Dispositions are `succeeded`, `failed`,
-`retry`, `rate_limit_retry`, or `exhausted`; waits measure elapsed sleep,
-bounded by the selected delay, including interrupted waits.
+`request_id`, `provider_error_code`, `retry_ordinal`, and `retry` fields
+record each subattempt. `status` stays the call's own outcome. Ordinals start
+at zero for each Ava decision or judge criterion. `retry` appears when the
+retry policy decided after the call: `decision` is `retry`, `rate_limit_retry`,
+or `exhausted`, and `wait_ms` measures elapsed sleep, bounded by the selected
+delay, including interrupted waits. A call whose reply arrived but failed the
+caller's parse is recorded as `succeeded` and still carries its `retry`
+decision.
 `completion_call_totals` counts all calls, failed calls, omitted summaries,
 and measured `rate_limit_wait_ms`, even after the cap. Regrades retain these
 records and counters for their new judge calls only; their reports do not

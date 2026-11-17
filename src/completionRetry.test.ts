@@ -196,7 +196,7 @@ describe('completion retry policy', () => {
     const signal = new AbortController().signal;
     for (const disposition of ['retry', 'exhausted'] as const) {
       await waitForCompletionRetry(
-        undefined,
+        1,
         { disposition, wait_ms: 0 },
         signal,
         {
@@ -215,7 +215,7 @@ describe('completion retry policy', () => {
     const controller = new AbortController();
     await assert.rejects(
       waitForCompletionRetry(
-        undefined,
+        1,
         { disposition: 'retry', wait_ms: 1000 },
         controller.signal,
         {
@@ -247,7 +247,7 @@ describe('completion retry policy', () => {
       let slept = false;
       let observations = 0;
       await waitForCompletionRetry(
-        undefined,
+        1,
         { disposition: 'retry', wait_ms: 1000 },
         new AbortController().signal,
         {
@@ -268,7 +268,7 @@ describe('completion retry policy', () => {
   it('aborts the shared sleep without waiting for another attempt', async () => {
     const controller = new AbortController();
     const pending = waitForCompletionRetry(
-      failure(429),
+      1,
       { disposition: 'rate_limit_retry', wait_ms: 64000 },
       controller.signal,
       {},
@@ -282,7 +282,7 @@ describe('completion retry policy', () => {
     const decisions: unknown[] = [];
     await assert.rejects(
       waitForCompletionRetry(
-        failure(429),
+        1,
         { disposition: 'rate_limit_retry', wait_ms: 64000 },
         controller.signal,
         {
@@ -291,7 +291,7 @@ describe('completion retry policy', () => {
             elapsed = 123;
             controller.abort(new Error('stop'));
           },
-          onRetryDecision: (_error, decision) => decisions.push(decision),
+          onRetryDecision: (_sequence, decision) => decisions.push(decision),
         },
       ),
       /stop/,

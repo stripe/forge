@@ -982,8 +982,7 @@ describe('local artifact store', () => {
       request_id: 'req_synthetic',
       provider_error_code: 'rate_limit_error',
       retry_ordinal: 0,
-      retry_wait_ms: 2000,
-      disposition: 'rate_limit_retry',
+      retry: { decision: 'rate_limit_retry', wait_ms: 2000 },
     };
     const observed = parseRunResult({
       ...result,
@@ -995,16 +994,18 @@ describe('local artifact store', () => {
         rate_limit_wait_ms: 2000,
       },
     });
-    assert.equal(observed.completion_calls[1]!.retry_wait_ms, 2000);
+    assert.equal(observed.completion_calls[1]!.retry?.wait_ms, 2000);
     assert.equal(observed.completion_call_totals!.rate_limit_wait_ms, 2000);
     for (const extra of [
       { http_status: 999 },
       { request_id: 'bad request id' },
       { provider_error_code: 'arbitrary' },
-      { retry_wait_ms: 64001 },
+      { retry: { decision: 'rate_limit_retry', wait_ms: 64001 } },
+      { retry: { decision: 'succeeded', wait_ms: 0 } },
+      { retry: { decision: 'retry', wait_ms: 0, extra: true } },
       { retry_ordinal: -1 },
       { retry_ordinal: 12 },
-      { disposition: 'arbitrary' },
+      { disposition: 'retry' },
       { body: 'not allowed' },
     ]) {
       assert.throws(() =>

@@ -580,9 +580,15 @@ export async function executeEvalWithTestHooks(
               : { workspaceText: safeWorkspaceText }),
             signal,
           },
-          async (request) => {
-            return (await completions.invoke('judge', request, request.signal))
-              .content;
+          async (request, attempt) => {
+            return (
+              await completions.invoke(
+                'judge',
+                request,
+                request.signal,
+                attempt,
+              )
+            ).content;
           },
           {
             redactionSecrets: secrets,
@@ -867,7 +873,8 @@ async function executeInteraction(
         : { initialPrompt: plan.interaction.initial_prompt }),
       signal,
     },
-    (request) => completions.invoke('role_player', request, signal),
+    (request, attempt) =>
+      completions.invoke('role_player', request, signal, attempt),
     {
       redactionSecrets: completions.secrets,
       onRetryDecision: completions.recordRetryDecision,

@@ -1,3 +1,4 @@
+import type { CompletionAttemptContext } from '../completionRetry.ts';
 import type {
   CompletionProvider,
   CompletionProviderCredentials,
@@ -50,7 +51,6 @@ const COMPLETION_STOP_REASONS = new Set<CompletionStopReason>([
 ]);
 
 export interface CompletionPromptInput {
-  readonly retryOrdinal?: number;
   readonly systemPrompt?: string;
   readonly messages: CompletionRequest['messages'];
   readonly maxTokens?: number;
@@ -73,7 +73,10 @@ export interface PreparedCompletionRuntime {
   readonly secrets: readonly string[];
   readonly calls: readonly CompletionCallSummaryV1[];
   readonly totals: CompletionCallTotalsV1;
-  recordRetryDecision(error: unknown, decision: CompletionRetryDecision): void;
+  recordRetryDecision(
+    sequence: number,
+    decision: CompletionRetryDecision,
+  ): void;
   has(purpose: CompletionPurpose): boolean;
   model(purpose: CompletionPurpose): ModelRefV1;
   provider(purpose: CompletionPurpose): CompletionProvider;
@@ -81,6 +84,7 @@ export interface PreparedCompletionRuntime {
     purpose: CompletionPurpose,
     prompt: CompletionPromptInput,
     signal: AbortSignal,
+    attempt?: CompletionAttemptContext,
   ): Promise<CompletionResponse>;
 }
 
@@ -213,7 +217,6 @@ export async function prepareCompletionRuntime(input: {
   }
 
   const callSlots: Array<CompletionCallSummaryV1 | undefined> = [];
-  const failures = new WeakMap<CompletionInvocationError, number>();
   let totalCalls = 0;
   let failedCalls = 0;
   let rateLimitWaitMs = 0;
@@ -247,19 +250,19 @@ export async function prepareCompletionRuntime(input: {
         rate_limit_wait_ms: rateLimitWaitMs,
       });
     },
-    recordRetryDecision(error: unknown, decision: CompletionRetryDecision) {
-      if (!(error instanceof CompletionInvocationError)) return;
-      const index = failures.get(error);
-      if (index === undefined) return;
-      failures.delete(error);
+    recordRetryDecision(sequence: number, decision: CompletionRetryDecision) {
+      const call = callSlots[sequence - 1];
+      // A call gets one decision; later reports for it are ignored.
+      if (call?.retry !== undefined) return;
       if (decision.disposition === 'rate_limit_retry')
         rateLimitWaitMs += decision.wait_ms;
-      const call = callSlots[index];
       if (call !== undefined)
-        callSlots[index] = Object.freeze({
+        callSlots[sequence - 1] = Object.freeze({
           ...call,
-          retry_wait_ms: decision.wait_ms,
-          disposition: decision.disposition,
+          retry: Object.freeze({
+            decision: decision.disposition,
+            wait_ms: decision.wait_ms,
+          }),
         });
     },
     has: (purpose: CompletionPurpose) => prepared.has(purpose),
@@ -270,14 +273,14 @@ export async function prepareCompletionRuntime(input: {
       purpose: CompletionPurpose,
       prompt: CompletionPromptInput,
       signal: AbortSignal,
+      attempt?: CompletionAttemptContext,
     ) {
       signal.throwIfAborted();
       const selected = required(purpose);
-      const { retryOrdinal, ...redactedPrompt } = redactCompletionPrompt(
-        prompt,
-        secrets,
-      );
+      const redactedPrompt = redactCompletionPrompt(prompt, secrets);
+      const retryOrdinal = attempt?.retryOrdinal;
       const sequence = ++totalCalls;
+      if (attempt !== undefined) attempt.sequence = sequence;
       const retained = sequence <= MAX_COMPLETION_CALL_SUMMARIES;
       if (retained) callSlots.push(undefined);
       try {
@@ -339,7 +342,6 @@ export async function prepareCompletionRuntime(input: {
           ),
           observation,
         );
-        failures.set(invocationError, sequence - 1);
         throw invocationError;
       }
     },
@@ -513,7 +515,6 @@ function completionCallSummary(
             : { provider_error_code: observation.provider_error_code }),
         }),
     ...(retryOrdinal === undefined ? {} : { retry_ordinal: retryOrdinal }),
-    disposition: status,
     purpose: binding.purpose,
     provider: binding.identity.id,
     provider_version: binding.identity.version,

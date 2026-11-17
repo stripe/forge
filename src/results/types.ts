@@ -142,13 +142,11 @@ export interface CompletionSubattemptRecordV1 {
   readonly request_id?: string;
   readonly provider_error_code?: CompletionProviderErrorCode;
   readonly retry_ordinal?: number;
-  readonly retry_wait_ms?: number;
-  readonly disposition?:
-    | 'succeeded'
-    | 'failed'
-    | 'retry'
-    | 'rate_limit_retry'
-    | 'exhausted';
+  /** What the retry policy decided after this call; absent when none applied. */
+  readonly retry?: {
+    readonly decision: 'retry' | 'rate_limit_retry' | 'exhausted';
+    readonly wait_ms: number;
+  };
 }
 
 export interface CompletionCallSummaryV1 extends CompletionSubattemptRecordV1 {

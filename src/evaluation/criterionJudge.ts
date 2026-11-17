@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  type CompletionAttemptContext,
   type CompletionRetryOptions,
   isInvalidOutputFailure,
   retryCompletion,
@@ -68,12 +69,12 @@ export interface CriterionCompletionRequest {
   readonly maxTokens: number;
   readonly responseSchema: StrictCompletionResponseSchema;
   readonly signal: AbortSignal;
-  readonly retryOrdinal?: number;
 }
 
 /** Prompt-only callback; the lifecycle binds run, purpose, model, and credentials. */
 export type CriterionCompletionInvoker = (
   request: CriterionCompletionRequest,
+  attempt?: CompletionAttemptContext,
 ) => Promise<string>;
 
 export interface CriterionJudgeInput {
@@ -290,11 +291,10 @@ async function judgeOneCriterion(
   const outcome = await retryCompletion<CriterionResultV1>(
     signal,
     options,
-    async (attempt) => {
+    async (attempt, context) => {
       signal.throwIfAborted();
       const request: CriterionCompletionRequest = {
         systemPrompt,
-        retryOrdinal: attempt - 1,
         messages: [
           {
             role: 'user',
@@ -307,7 +307,7 @@ async function judgeOneCriterion(
       };
       options.validateRequest?.(request);
       try {
-        const raw = await invoke(request);
+        const raw = await invoke(request, context);
         signal.throwIfAborted();
         const parsed = parseJudgeResponse(raw, criterion);
         if (parsed.valid) return { ok: true, value: parsed.result };

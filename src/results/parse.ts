@@ -511,14 +511,12 @@ const completionCallSummary = z
       .nonnegative()
       .max(MAX_RECORDED_COMPLETION_ATTEMPTS - 1)
       .optional(),
-    retry_wait_ms: z
-      .number()
-      .int()
-      .min(0)
-      .max(MAX_COMPLETION_RETRY_WAIT_MS)
-      .optional(),
-    disposition: z
-      .enum(['succeeded', 'failed', 'retry', 'rate_limit_retry', 'exhausted'])
+    retry: z
+      .object({
+        decision: z.enum(['retry', 'rate_limit_retry', 'exhausted']),
+        wait_ms: z.number().int().min(0).max(MAX_COMPLETION_RETRY_WAIT_MS),
+      })
+      .strict()
       .optional(),
   })
   .strict();
@@ -805,8 +803,8 @@ const runResultSchema = z
           value.completion_calls.reduce(
             (sum, call) =>
               sum +
-              (call.disposition === 'rate_limit_retry'
-                ? (call.retry_wait_ms ?? 0)
+              (call.retry?.decision === 'rate_limit_retry'
+                ? call.retry.wait_ms
                 : 0),
             0,
           ))
