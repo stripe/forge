@@ -1117,9 +1117,8 @@ decision.
 `completion_call_totals` counts all calls, failed calls, omitted summaries,
 and measured `rate_limit_wait_ms`, even after the cap. Regrades retain these
 records and counters for their new judge calls only; their reports do not
-include waits from the source run. Runs without judging criteria retain
-their source-run totals with the unchanged evaluation. Reused older regrades
-without counters leave the wait total absent. Older results may omit the new
+include waits from the source run, and runs without judging criteria report
+no wait. Reused older regrades without counters leave the wait total absent. Older results may omit the new
 fields. These are observations and do not change plan digests. Attempts that
 fail before result commit do not persist these records.
 

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
+import { defaultForgeEngine } from '../engine.ts';
+import { scoreEvaluation } from '../evaluation/score.ts';
 import { parseExperimentRunReport } from '../experimentReport.ts';
 import { CompletionInvocationError } from '../contracts/completion.ts';
 import {
@@ -294,5 +296,46 @@ describe('regradeExperimentRun', () => {
     );
     assert.equal(report.runs[0]!.rate_limit_wait_ms, 3000);
     assert.equal(report.summary.rate_limit_wait_ms, 3000);
+  });
+
+  it('reports no wait for runs without judging criteria, whatever the source run waited', async () => {
+    const root = await temporaryRoot('forge-regrade-notjudged-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const unjudged = {
+      ...defaultForgeEngine,
+      async verifyCompletedRun(location: string) {
+        const completed = await defaultForgeEngine.verifyCompletedRun(location);
+        return {
+          ...completed,
+          result: {
+            ...completed.result,
+            evaluation: scoreEvaluation([], completed.result.evaluation.checks),
+            completion_call_totals: {
+              calls: 3,
+              failed: 2,
+              omitted: 0,
+              rate_limit_wait_ms: 9000,
+            },
+          },
+        };
+      },
+    };
+    const output = path.join(root, 'regrade-unjudged');
+    const none = dependencies([]);
+    const summary = await regradeExperimentRun(
+      {
+        experimentRun: source.experimentLocation,
+        judge: { provider: 'anthropic', model: 'claude-opus-4-6' },
+        output,
+      },
+      { ...none.dependencies, engine: unjudged },
+    );
+    assert.equal(summary.not_judged, 1);
+    const report = parseExperimentRunReport(
+      JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
+    );
+    assert.equal(report.runs[0]!.rate_limit_wait_ms, undefined);
+    assert.equal(report.summary.rate_limit_wait_ms, undefined);
   });
 });

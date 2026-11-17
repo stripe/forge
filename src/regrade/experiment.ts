@@ -230,13 +230,13 @@ export async function regradeExperimentRun(
         regraded?.kind === 'regraded' || regraded?.kind === 'reused'
           ? regraded.regrade
           : undefined;
-      const saved =
-        regrade === undefined
-          ? (await engine.verifyCompletedRun(outcome.artifact!.location)).result
-          : undefined;
-      const evaluation = regrade?.evaluation ?? saved!.evaluation;
-      const totals =
-        regrade?.completion_call_totals ?? saved?.completion_call_totals;
+      const evaluation =
+        regrade?.evaluation ??
+        (await engine.verifyCompletedRun(outcome.artifact!.location)).result
+          .evaluation;
+      // Waits are scoped to this regrade's own judge calls. A run it did not
+      // judge made none, and the source report already holds its waits.
+      const totals = regrade?.completion_call_totals;
       runs.push({
         ...base,
         run_id: outcome.run_id,
