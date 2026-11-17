@@ -400,6 +400,18 @@ const ModelRefSchema = z
   })
   .strict();
 
+const UpstreamProvidersSchema = z
+  .array(
+    z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/, 'must be a provider slug'),
+  )
+  .min(1)
+  .max(16)
+  .refine((slugs) => new Set(slugs).size === slugs.length, {
+    message: 'provider slugs must be unique',
+  });
+
 export const ModelProfileSchema = z
   .object({
     limit: z
@@ -419,6 +431,7 @@ const AgentSelectionSchema = ModelRefSchema.extend({
   adapter: SimpleIdentifierSchema,
   hook_trust: z.enum(['native', 'automation']).optional(),
   model_profile: ModelProfileSchema.optional(),
+  upstream_providers: UpstreamProvidersSchema.optional(),
   // Never valid; declared only so a removed routing field gets a direct fix.
   endpoint: z
     .never({
@@ -429,6 +442,16 @@ const AgentSelectionSchema = ModelRefSchema.extend({
 })
   .strict()
   .superRefine((agent, context) => {
+    if (
+      agent.adapter !== 'opencode' &&
+      agent.upstream_providers !== undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['upstream_providers'],
+        message: `upstream_providers is not supported by ${agent.adapter}`,
+      });
+    }
     if (
       ['claude-code', 'codex'].includes(agent.adapter) &&
       agent.model_profile !== undefined

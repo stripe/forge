@@ -199,6 +199,44 @@ describe('experiment expansion and run planning', () => {
     assert.equal(plans[0]!.agent.model_profile!.limit.context, 32000);
   });
 
+  it('retains the provider name and upstream providers in the plan and its selection and separates them by identity', () => {
+    const experiment = experimentConfig();
+    const agent = {
+      adapter: 'opencode',
+      provider: 'openrouter',
+      model: 'gateway-code',
+      model_profile: structuredClone(OPEN_CODE_MODEL_PROFILE),
+      upstream_providers: ['google-vertex'],
+    };
+    experiment.matrix = {
+      cases: [CASE_A_PATH],
+      treatments: ['baseline'],
+      agents: [
+        agent,
+        { ...agent, upstream_providers: ['anthropic'] },
+        { ...agent, provider: 'gateway-direct' },
+      ],
+      repetitions: 1,
+      retries: 0,
+    };
+    experiment.treatments = { baseline: { setup: [] } };
+    const loaded = inputs({ experiment });
+    const plans = expandExperiment(experiment, loaded.dataset).map(
+      (selection) => resolveRunPlan({ ...loaded, selection }),
+    );
+    assert.equal(plans.length, 3);
+    assert.equal(plans[0]!.agent.provider, 'openrouter');
+    assert.deepEqual(plans[0]!.agent.upstream_providers, ['google-vertex']);
+    assert.deepEqual(plans[0]!.agent, plans[0]!.selection.agent);
+    assert.ok(Object.isFrozen(plans[0]!.agent.upstream_providers));
+    assert.equal(
+      new Set(plans.map((plan) => resolvedRunPlanSha256(plan))).size,
+      3,
+    );
+    agent.upstream_providers.push('mutated');
+    assert.deepEqual(plans[0]!.agent.upstream_providers, ['google-vertex']);
+  });
+
   it('records Codex hook trust explicitly and separates policies in selection and plan identity', () => {
     const experiment = experimentConfig();
     experiment.matrix.agents = [

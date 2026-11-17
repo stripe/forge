@@ -213,6 +213,37 @@ describe('OpenCode adapter', () => {
       assert.throws(() => createOpenCodeAdapter({ providers: bad }));
   });
 
+  it('pins the upstream provider only for selections that author it', () => {
+    const adapter = createOpenCodeAdapter({
+      providers: {
+        openrouter: {
+          integration: 'openai-compatible',
+          baseUrl: 'https://openrouter.example/api/v1',
+        },
+      },
+    });
+    const modelEntry = (extra: object = {}) =>
+      JSON.parse(
+        adapter.requirements({ ...selection, provider: 'openrouter', ...extra })
+          .environment.variables!.OPENCODE_CONFIG_CONTENT!,
+      ).provider.forge.models[OPEN_CODE_MODEL];
+    assert.deepEqual(
+      modelEntry({ upstream_providers: ['anthropic', 'google-vertex'] })
+        .options,
+      {
+        provider: {
+          order: ['anthropic', 'google-vertex'],
+          allow_fallbacks: false,
+        },
+      },
+    );
+    // Unpinned: exactly the profile plus tool_call, as before.
+    assert.deepEqual(modelEntry(), {
+      ...selection.model_profile,
+      tool_call: true,
+    });
+  });
+
   it('declares only explicit Chat Completions routing, isolated state, and its credential', () => {
     const adapter = createOpenCodeAdapter({
       baseUrl: 'https://gateway.example/v1',
