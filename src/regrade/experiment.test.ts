@@ -127,7 +127,7 @@ describe('regradeExperimentRun', () => {
     assert.equal(sourceReport.runs[0]!.evaluation!.score, 1);
   });
 
-  it('refuses to mix judges in one output and leaves that run unscored', async () => {
+  it('rejects an output holding another judge before any call or write', async () => {
     const root = await temporaryRoot('forge-regrade-exp-');
     roots.push(root);
     const source = await runJudgedFixture(root);
@@ -140,22 +140,21 @@ describe('regradeExperimentRun', () => {
       },
       dependencies([ORIGINAL_JUDGMENT]).dependencies,
     );
+    const before = await snapshotTree(output);
     const other = dependencies([ORIGINAL_JUDGMENT]);
-    const summary = await regradeExperimentRun(
-      {
-        experimentRun: source.experimentLocation,
-        judge: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-        output,
-      },
-      other.dependencies,
+    await assert.rejects(
+      regradeExperimentRun(
+        {
+          experimentRun: source.experimentLocation,
+          judge: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+          output,
+        },
+        other.dependencies,
+      ),
+      /already holds regrades from a different judge/,
     );
     assert.equal(other.scripted.calls.length, 0);
-    assert.equal(summary.failed.length, 1);
-    assert.match(summary.failed[0]!.message, /different judge/);
-    const report = parseExperimentRunReport(
-      JSON.parse(await fs.readFile(path.join(output, 'report.json'), 'utf8')),
-    );
-    assert.equal(report.runs[0]!.state, 'pending');
+    assert.deepEqual(await snapshotTree(output), before);
   });
 
   it('refuses a second regrade writing to the same output at the same time', async () => {

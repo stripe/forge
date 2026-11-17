@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { defaultForgeEngine } from '../engine.ts';
+import { defaultForgeEngine, type ForgeEngine } from '../engine.ts';
 import { inspectExperimentRun } from '../experiment.ts';
 import {
   buildExperimentRunReport,
@@ -142,6 +142,26 @@ export async function regradeExperimentRun(
         kind: 'failed',
         message: 'The saved run failed artifact verification.',
       });
+    // Read every saved regrade first: one run on another judge makes the whole output incompatible,
+    // and that must be known before any judge call or write fills the gaps.
+    const savedRegrades = new Map<number, SavedRegrade>();
+    for (const index of completedIndexes) {
+      const outcome = inspection.outcomes[index]!;
+      const saved = await loadSavedRegrade(
+        engine,
+        path.join(output, 'runs', `${outcome.run_id}.json`),
+        outcome.artifact!.location,
+      );
+      if (saved !== undefined) savedRegrades.set(index, saved);
+      if (
+        saved?.kind === 'valid' &&
+        (saved.regrade.judge.provider !== input.judge.provider ||
+          saved.regrade.judge.model !== input.judge.model)
+      )
+        throw new Error(
+          'The regrade output already holds regrades from a different judge. Use the same judge to finish it, or a new output directory.',
+        );
+    }
     let next = 0;
     const worker = async () => {
       for (;;) {
@@ -150,6 +170,7 @@ export async function regradeExperimentRun(
         if (index === undefined) return;
         const outcome = inspection.outcomes[index]!;
         const result = await regradeOne(
+          index,
           outcome.run_id!,
           outcome.artifact!.location,
         );
@@ -158,29 +179,16 @@ export async function regradeExperimentRun(
       }
     };
     const regradeOne = async (
+      index: number,
       runId: string,
       location: string,
     ): Promise<RegradeOutcome> => {
       const file = path.join(output, 'runs', `${runId}.json`);
       try {
-        const existingBody = await readExistingRegrade(file);
-        if (existingBody !== undefined) {
-          const verified = await engine.verifyCompletedRun(location);
-          const existing = parseRegradeResult(JSON.parse(existingBody), {
-            result: verified.result,
-            resultSha256: sha256Digest(
-              await fs.readFile(path.join(location, 'result.json')),
-            ),
-          });
-          if (
-            existing.judge.provider !== input.judge.provider ||
-            existing.judge.model !== input.judge.model
-          )
-            throw new Error(
-              'An existing regrade in the output uses a different judge.',
-            );
-          return { kind: 'reused', regrade: existing };
-        }
+        const saved = savedRegrades.get(index);
+        if (saved?.kind === 'invalid') throw new Error(saved.message);
+        if (saved?.kind === 'valid')
+          return { kind: 'reused', regrade: saved.regrade };
         const regrade = await regradeCompletedRun(
           {
             location,
@@ -363,6 +371,43 @@ function isWithin(parent: string, candidate: string): boolean {
     relative === '' ||
     (!relative.startsWith('..') && !path.isAbsolute(relative))
   );
+}
+
+type SavedRegrade =
+  | { readonly kind: 'valid'; readonly regrade: RegradeResultV1 }
+  | { readonly kind: 'invalid'; readonly message: string };
+
+/** Strictly read the saved regrade at `file` for the committed run at `location`; invalid files fail only their run. */
+async function loadSavedRegrade(
+  engine: ForgeEngine,
+  file: string,
+  location: string,
+): Promise<SavedRegrade | undefined> {
+  const body = await readExistingRegrade(file).catch((error: unknown) => ({
+    error,
+  }));
+  if (body === undefined) return undefined;
+  try {
+    if (typeof body !== 'string') throw body.error;
+    const verified = await engine.verifyCompletedRun(location);
+    return {
+      kind: 'valid',
+      regrade: parseRegradeResult(JSON.parse(body), {
+        result: verified.result,
+        resultSha256: sha256Digest(
+          await fs.readFile(path.join(location, 'result.json')),
+        ),
+      }),
+    };
+  } catch (error) {
+    return {
+      kind: 'invalid',
+      message: (error instanceof Error ? error.message : String(error)).slice(
+        0,
+        500,
+      ),
+    };
+  }
 }
 
 /** The bounded text of a saved regrade, or `undefined` when none exists. */
