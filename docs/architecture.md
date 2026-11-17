@@ -330,6 +330,46 @@ owner's marker and an empty lock directory, so delayed cleanup cannot remove
 a replacement owner's lock. Committed artifact locations are compared after
 resolving filesystem aliases, including symlinked output directories.
 
+Alongside `experiment.json` and `report.json`, the experiment root holds
+`events.jsonl`. The controller sends progress to its callback immediately and
+queues each validated event for one background writer as canonical JSON with
+`experiment_run_id` and an `observed_at` UTC observation time. The states are `started`, `resumed`, `running`, `completed`, `skipped`,
+and `errored`; selection events retain `selection` and `run_id`, and errors
+retain the same stable code and optional credential-redacted diagnostic as
+stderr. Resume appends a `resumed` marker after inspecting prior attempts
+and before scheduling pending work.
+The callback and stderr keep their existing `resuming` state name.
+
+The log format belongs to the checkpoint's Forge release. Records are bounded
+to 64 KiB and new logs use mode `0600`. Controller observation policy bounds the
+pending queue to 1 MiB, each append to 250 ms, and final drain to 500 ms.
+Scheduling and stderr do not wait for individual appends. A timed-out append
+disables further recording for that invocation and cancels unissued writes;
+an already-issued filesystem operation may settle later. Permanent filesystem
+failures, such as a permission error, also disable recording. Transient failures
+are not retried for the same event; later events may record recovery. Log I/O
+failures and queue overflow are counted as gaps. Returned summaries include optional
+`progress_log: {state: "unavailable", reason, affected_events}` when gaps occurred.
+Reasons are `io_error`, `io_timeout`, `buffer_full`, and `recording_error`
+(the first observed reason is kept). The next successfully saved event includes optional `recording_gap`
+with the same shape for preceding gaps. Counts include dropped events and
+writes whose completion is unknown after failure or timeout. Unexpected background
+writer errors disable recording with `recording_error`; they cannot reject a
+completed experiment or replace its primary error. Direct validation of progress
+contracts still throws for schema drift, and low-level parser/writer functions
+still surface programming errors to their callers.
+
+Writes are not synced. Separator and body use one write, and short writes count
+as I/O failures. Interruption can leave a torn line. The read-only tail reader
+bounds reads to 128 KiB and 250 ms, tolerates interrupted final records, and
+reports missing, empty, interrupted, invalid, unsafe, oversized, unreadable,
+timed-out, or identity-mismatched observations as typed unavailable states. The compatibility reader
+returns no event when unavailable. Neither last-event time nor the absence of
+a terminal event establishes liveness or completion; use checkpoint outcomes
+and the lock owner together. The log is optional for older folders and is never
+an input to resume decisions, judging, scoring, verification, or regrade.
+Completed-run file inventories apply only within `runs/<eval-run-id>/`.
+
 `--resume <experiment-run-id>` requires an explicit ID and loads that
 experiment run's saved selections. Bare `--resume` is rejected. The resolved
 plans must retain their original checksums. Resume independently verifies prior eval run
