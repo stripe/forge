@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import {
   completionRetryDecision,
-  MAX_COMPLETION_ATTEMPTS,
   INITIAL_COMPLETION_RETRY_STATE,
+  MAX_COMPLETION_ATTEMPTS,
   retryCompletion,
   waitForCompletionRetry,
 } from './completionRetry.ts';

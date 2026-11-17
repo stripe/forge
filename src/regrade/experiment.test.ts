@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
+import { CompletionInvocationError } from '../contracts/completion.ts';
 import { defaultForgeEngine } from '../engine.ts';
 import { scoreEvaluation } from '../evaluation/score.ts';
 import { parseExperimentRunReport } from '../experimentReport.ts';
-import { CompletionInvocationError } from '../contracts/completion.ts';
 import {
   createScriptedCompletionProvider,
   createStaticCredentialResolver,

@@ -291,7 +291,7 @@ async function judgeOneCriterion(
   const outcome = await retryCompletion<CriterionResultV1>(
     signal,
     options,
-    async (attempt, context) => {
+    async (_attempt, context) => {
       signal.throwIfAborted();
       const request: CriterionCompletionRequest = {
         systemPrompt,

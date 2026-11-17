@@ -3,8 +3,8 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
-import type { ForgeComposition } from './contracts/composition.ts';
 import { CompletionInvocationError } from './contracts/completion.ts';
+import type { ForgeComposition } from './contracts/composition.ts';
 import { credentialReference } from './contracts/credentials.ts';
 import { createForgeEngine, defaultForgeEngine } from './engine.ts';
 import {

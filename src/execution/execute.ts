@@ -7,6 +7,7 @@ import {
   parseNormalizedTrajectory,
   serializeAtifTrajectory,
 } from '../atif/index.ts';
+import type { CompletionRetryOptions } from '../completionRetry.ts';
 import type {
   AgentAdapter,
   AgentEvidenceIdentity,
@@ -19,7 +20,6 @@ import type {
   AgentSessionRuntime,
   AgentTurn,
 } from '../contracts/agent.ts';
-import type { CompletionRetryOptions } from '../completionRetry.ts';
 import type {
   RunArtifact,
   RunArtifactTransaction,
