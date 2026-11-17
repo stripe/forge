@@ -15,7 +15,7 @@ import type {
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   JudgeTranscriptProjectionV1,
-  JudgeVisibleStepV1,
+  JudgeTranscriptStepsV1,
 } from '../evaluation/judgeTranscript.ts';
 import type {
   JsonObject,
@@ -229,7 +229,7 @@ export interface JudgeEvidenceV1 {
     readonly copied_context: typeof JUDGE_TRANSCRIPT_COPIED_CONTEXT;
     readonly included_fields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
     /** Canonical serialization of these steps is the judge's transcript input. */
-    readonly steps: readonly JudgeVisibleStepV1[];
+    readonly steps: JudgeTranscriptStepsV1;
     /** Present only when driver evidence exceeds the whole-prompt budget. */
     readonly omitted?: 'judge_budget_exceeded';
     readonly warnings?: JudgeTranscriptProjectionV1['warnings'];

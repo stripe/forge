@@ -12,6 +12,8 @@ import {
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   type JudgeTranscriptProjectionV1,
+  type JudgeTranscriptExcerptV1,
+  type JudgeTranscriptStepsV1,
   type JudgeVisibleStepV1,
   parseJudgeTranscriptProjection,
 } from './judgeTranscript.ts';
@@ -293,6 +295,18 @@ describe('parseJudgeTranscriptProjection', () => {
       warnings: [{ code: 'transcript_truncated' as const, message }],
     };
     assert.deepEqual(parseJudgeTranscriptProjection(projection), projection);
+    // An excerpt replaces the whole step list; the types keep it out of steps.
+    const excerpt: JudgeTranscriptExcerptV1 = {
+      source: 'omission',
+      message,
+      prefix: '[',
+      suffix: ']\n',
+    };
+    const excerptSteps: JudgeTranscriptStepsV1 = [excerpt];
+    assert.equal(excerptSteps.length, 1);
+    // @ts-expect-error an excerpt is not a per-step variant
+    const mixed: readonly JudgeVisibleStepV1[] = [excerpt];
+    assert.equal(mixed.length, 1);
     const { warnings: _, ...withoutWarning } = projection;
     assert.throws(
       () => parseJudgeTranscriptProjection(withoutWarning),

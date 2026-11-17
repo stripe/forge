@@ -5,7 +5,10 @@ import * as path from 'node:path';
 import { afterEach, describe, it } from 'vitest';
 
 import { type AtifStep, parseAtifTrajectory } from '../atif/index.ts';
-import { createJudgeTranscriptProjection } from '../evaluation/judgeTranscript.ts';
+import {
+  createJudgeTranscriptProjection,
+  type JudgeVisibleStepV1,
+} from '../evaluation/judgeTranscript.ts';
 import { scoreEvaluation } from '../evaluation/score.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import type { ResolvedRunPlanV1 } from '../model/types.ts';
@@ -1944,10 +1947,11 @@ describe('local artifact store', () => {
 
     for (const steps of [
       [],
-      judgeEvidence.transcript.steps.map((step) =>
-        step.source === 'agent'
-          ? { ...step, message: 'invented answer' }
-          : step,
+      (judgeEvidence.transcript.steps as readonly JudgeVisibleStepV1[]).map(
+        (step) =>
+          step.source === 'agent'
+            ? { ...step, message: 'invented answer' }
+            : step,
       ),
     ]) {
       const location = await commitEvidence({

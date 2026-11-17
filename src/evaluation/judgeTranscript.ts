@@ -76,16 +76,26 @@ export interface JudgeVisibleAgentStepV1 {
   readonly observation?: JudgeVisibleObservationV1;
 }
 
-/** Root behavior, or a previously recorded marked start/end excerpt. */
+/** One explicitly allowlisted, root-trajectory step visible to a judge. */
 export type JudgeVisibleStepV1 =
   | JudgeVisibleUserStepV1
-  | JudgeVisibleAgentStepV1
-  | {
-      readonly source: 'omission';
-      readonly message: string;
-      readonly prefix: string;
-      readonly suffix: string;
-    };
+  | JudgeVisibleAgentStepV1;
+
+/**
+ * A previously recorded marked start/end excerpt. It replaces the whole step
+ * list and never sits beside other steps.
+ */
+export interface JudgeTranscriptExcerptV1 {
+  readonly source: 'omission';
+  readonly message: string;
+  readonly prefix: string;
+  readonly suffix: string;
+}
+
+/** Judge-visible transcript content: steps, or a recorded excerpt of them. */
+export type JudgeTranscriptStepsV1 =
+  | readonly JudgeVisibleStepV1[]
+  | readonly [JudgeTranscriptExcerptV1];
 
 /** Exact transcript projection and declared policy supplied to a criterion judge. */
 export interface JudgeTranscriptProjectionV1 {
