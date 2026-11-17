@@ -1090,9 +1090,12 @@ with its invocation and error state. Claude Code supplies tool-result text,
 Codex supplies command and MCP output, and OpenCode supplies tool output or
 errors. A started-only Codex command or MCP call has an unavailable marker and
 makes no claim about success or failure. Native media bytes are omitted
-explicitly. Missing driver results cannot be recovered by fallback. Resolved
-secrets are redacted before these
-prefixes are clipped. Assistant, argument, result, and call-count truncation
+explicitly. Missing driver results cannot be recovered by fallback. Fallback
+redacts resolved secrets from assistant text, arguments, and results immediately
+before clipping each, after normalizing arguments to JSON, so inputs that are not
+JSON are marked omitted rather than failing the run. Its `redaction_count` covers
+the text it emitted plus tool-result text redacted at the interaction boundary,
+including result text that fallback later clips. Assistant, argument, result, and call-count truncation
 has a visible marker and adds a `value_omitted` warning. Scoring consumes this
 exact bounded trajectory; judging receives its declared root-behavior projection
 subject to the [whole-prompt budget](#judge-visible-projection). If Ava

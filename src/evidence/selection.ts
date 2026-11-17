@@ -18,6 +18,7 @@ import type {
   AgentNativeEvidenceResult,
   AgentToolCall,
 } from '../contracts/agent.ts';
+import type { SecretRedactor } from '../security/redaction.ts';
 
 // Keep deterministic fallback comfortably below the stricter whole-ATIF graph
 // budgets. Authored prompts are independently capped at 1 MiB and generated
@@ -43,8 +44,12 @@ export interface SelectAgentEvidenceInput {
   readonly sessionId: string;
   readonly completedTurns: readonly CompletedEvidenceTurn[];
   readonly collected: AgentNativeEvidenceResult;
-  /** Optional pre-redacted ledger; raw completed turns still govern native coverage. */
-  readonly fallbackTurns?: readonly CompletedEvidenceTurn[];
+  /**
+   * Redacts fallback assistant text, tool arguments, and tool results right
+   * before each is cut, so a clipped prefix never retains part of a secret.
+   * Native coverage always compares the raw completed turns.
+   */
+  readonly redactor?: SecretRedactor;
 }
 
 /** Validate the adapter's pure coding-agent identity before allocating authority. */
@@ -338,7 +343,8 @@ export function createDriverFallbackEvidence(
   input: Omit<SelectAgentEvidenceInput, 'collected'>,
   reason: AtifNormalizationWarning,
 ): NormalizedTrajectory {
-  const completedTurns = input.fallbackTurns ?? input.completedTurns;
+  const completedTurns = input.completedTurns;
+  const redactor = input.redactor;
   const steps: AtifTrajectoryV1_8['steps'] = [];
   const nonemptyAssistantTurns = completedTurns.filter(
     ({ assistant }) => assistant.length > 0,
@@ -356,8 +362,10 @@ export function createDriverFallbackEvidence(
   let detailOmitted = false;
 
   for (const [turnIndex, turn] of completedTurns.entries()) {
-    let assistant = boundedPrefix(turn.assistant, assistantLimit);
-    if (assistant.length !== turn.assistant.length) detailOmitted = true;
+    const visibleAssistant =
+      redactor === undefined ? turn.assistant : redactor.text(turn.assistant);
+    let assistant = boundedPrefix(visibleAssistant, assistantLimit);
+    if (assistant.length !== visibleAssistant.length) detailOmitted = true;
     steps.push({
       step_id: steps.length + 1,
       source: 'user',
@@ -368,6 +376,7 @@ export function createDriverFallbackEvidence(
     const projectedTools = fallbackToolCalls(
       turn.toolCalls.slice(0, retainedToolCallCount),
       agentStepId,
+      redactor,
     );
     if (
       retainedToolCallCount !== turn.toolCalls.length ||
@@ -436,6 +445,7 @@ export function createDriverFallbackEvidence(
 function fallbackToolCalls(
   calls: readonly AgentToolCall[],
   stepId: number,
+  redactor: SecretRedactor | undefined,
 ): {
   calls: AtifToolCall[];
   results: AtifObservationResult[];
@@ -453,10 +463,13 @@ function fallbackToolCalls(
       collision += 1;
     }
     usedIds.add(toolCallId);
-    const toolArguments = fallbackToolArguments(call.input);
+    const toolArguments = fallbackToolArguments(call.input, redactor);
     if (toolArguments.detailOmitted) detailOmitted = true;
     if (call.result !== undefined) {
-      const safeContent = call.result.content;
+      const safeContent =
+        redactor === undefined
+          ? call.result.content
+          : redactor.text(call.result.content);
       const content = boundedPrefix(
         safeContent +
           (call.result.truncated === true
@@ -501,7 +514,10 @@ function boundedToolCallCounts(
   return counts;
 }
 
-function fallbackToolArguments(value: unknown): {
+function fallbackToolArguments(
+  value: unknown,
+  redactor: SecretRedactor | undefined,
+): {
   arguments: JsonObject;
   detailOmitted: boolean;
 } {
@@ -543,7 +559,10 @@ function fallbackToolArguments(value: unknown): {
   if (encoded === undefined || lossy) {
     return omittedArguments();
   }
-  const json = JSON.parse(encoded) as JsonValue;
+  // Only now is the value known to be JSON, so redact here, before measuring
+  // and cutting it.
+  const parsed = JSON.parse(encoded) as JsonValue;
+  const json = redactor === undefined ? parsed : redactor.json(parsed);
   const candidate =
     json !== null && typeof json === 'object' && !Array.isArray(json)
       ? json

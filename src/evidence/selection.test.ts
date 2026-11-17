@@ -6,6 +6,7 @@ import type {
   AgentNativeEvidenceResult,
   AgentToolCall,
 } from '../contracts/agent.ts';
+import { createSecretRedactor } from '../security/redaction.ts';
 import {
   type CompletedEvidenceTurn,
   parseAgentEvidenceIdentity,
@@ -19,6 +20,10 @@ const agent = {
   version: 'adapter-1',
 } as AgentAdapter;
 const identity = { name: 'test-agent-binary', version: '2.0.0' };
+const UNAVAILABLE = {
+  code: 'source_unavailable' as const,
+  message: 'No native source.',
+};
 
 describe('selectAgentEvidence', () => {
   it('keeps bounded argument text and correlated tool output with visible truncation', () => {
@@ -791,6 +796,70 @@ describe('Codex native completed-turn coverage', () => {
       ),
       true,
     );
+  });
+});
+
+describe('driver fallback redaction', () => {
+  const secret = 'synthetic-private-token';
+
+  function fallback(toolCalls: readonly AgentToolCall[], assistant = 'Done.') {
+    const redactor = createSecretRedactor([secret]);
+    const selected = selectAgentEvidence({
+      agent,
+      identity,
+      model: 'test-model',
+      sessionId: SESSION_ID,
+      completedTurns: [{ user: 'Prompt', assistant, toolCalls }],
+      redactor,
+      collected: { kind: 'unavailable', reason: UNAVAILABLE },
+    });
+    return { selected, redactor };
+  }
+
+  it('redacts values before cutting them and counts only what is emitted', () => {
+    const { selected, redactor } = fallback(
+      [
+        {
+          id: 'call',
+          name: 'Tool',
+          input: { query: `${'q'.repeat(4000)}${secret}${'q'.repeat(500)}` },
+          result: { content: `${'r'.repeat(8180)}${secret}${'r'.repeat(50)}` },
+        },
+      ],
+      `${'a'.repeat(8 * 1024 * 1024 - 5)}${secret}`,
+    );
+    const text = JSON.stringify(selected.trajectory);
+    assert.equal(text.includes('synthetic-private'), false);
+    assert.equal(text.includes('private-token'), false);
+    assert.equal(redactor.replacements, 3);
+  });
+
+  it('does not count secrets in tool calls that the call budget drops', () => {
+    const calls = Array.from({ length: 300 }, (_, index) => ({
+      id: `call-${index}`,
+      name: 'Tool',
+      input: { value: index === 0 || index === 299 ? secret : 'plain' },
+    }));
+    const { selected, redactor } = fallback(calls);
+    assert.equal(selected.trajectory.steps[1]?.tool_calls?.length, 256);
+    assert.equal(redactor.replacements, 1);
+  });
+
+  it('marks non-JSON input omitted instead of failing redaction', () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const { selected, redactor } = fallback([
+      { name: 'Tool', input: cyclic },
+      { name: 'Tool', input: { value: 1n } },
+    ]);
+    const omitted = {
+      forge_omitted_arguments: '[Forge omitted unavailable tool arguments.]',
+    };
+    assert.deepEqual(
+      selected.trajectory.steps[1]?.tool_calls?.map((call) => call.arguments),
+      [omitted, omitted],
+    );
+    assert.equal(redactor.replacements, 0);
   });
 });
 

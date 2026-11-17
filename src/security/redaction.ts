@@ -69,6 +69,33 @@ export function redactSecrets<T>(
   return { value: visit(value, new Set()) as T, replacements };
 }
 
+/** Redacts exact resolved credentials and counts the replacements it makes. */
+export interface SecretRedactor {
+  text(value: string): string;
+  json<T>(value: T): T;
+  readonly replacements: number;
+}
+
+/** Redact values one at a time, for callers that must redact immediately before a cut. */
+export function createSecretRedactor(secrets: readonly string[]): SecretRedactor {
+  let replacements = 0;
+  return {
+    text(value) {
+      const redacted = redactSecrets(value, secrets);
+      replacements += redacted.replacements;
+      return redacted.value;
+    },
+    json(value) {
+      const redacted = redactSecrets(value, secrets);
+      replacements += redacted.replacements;
+      return redacted.value;
+    },
+    get replacements() {
+      return replacements;
+    },
+  };
+}
+
 /** Fail closed when a logical JSON value contains a resolved credential. */
 export function assertNoSecretsInJsonValue(
   value: unknown,

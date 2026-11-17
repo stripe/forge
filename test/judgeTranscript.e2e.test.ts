@@ -289,3 +289,56 @@ it.each([
     }
   },
 );
+
+it.each([
+  { name: 'undefined property', input: { value: undefined } },
+  { name: 'BigInt', input: { value: 1n } },
+  { name: 'Map', input: { value: new Map([['a', 1]]) } },
+  {
+    name: 'cycle',
+    input: (() => {
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      return cyclic;
+    })(),
+  },
+])(
+  'completes a run whose tool input is not JSON ($name) and marks the arguments omitted',
+  async ({ input }) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-non-json-'));
+    try {
+      const agent = createScriptedAgentAdapter({
+        turns: [
+          {
+            text: 'Done.',
+            sessionId: 'selected',
+            toolCalls: [{ id: 'call', name: 'Read', input }],
+          },
+        ],
+      });
+      const completed = await executeEval({
+        runId: 'non-json-input',
+        plan: createTestResolvedRunPlan(),
+        composition: {
+          runtime: createFakeRuntimeAdapter().adapter,
+          agents: new Map([[agent.adapter.id, agent.adapter]]),
+          credentialResolver: createStaticCredentialResolver({}),
+          inputProvider: createMemoryRunInputProvider(),
+          artifactStore: createArtifactStore({ root }),
+        },
+      });
+      await verifyCompletedRun(completed.location);
+      const trajectory = JSON.parse(
+        await fs.readFile(
+          path.join(completed.location, 'trajectory.json'),
+          'utf8',
+        ),
+      );
+      assert.deepEqual(trajectory.steps[1].tool_calls[0].arguments, {
+        forge_omitted_arguments: '[Forge omitted unavailable tool arguments.]',
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  },
+);

@@ -112,6 +112,7 @@ import {
 import {
   assertNoSecrets,
   assertNoSecretsInJsonValue,
+  createSecretRedactor,
   redactSecrets,
 } from '../security/redaction.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
@@ -473,14 +474,14 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
-      const fallbackTurns = redactSecrets(interaction.turns, secrets);
+      const redactor = createSecretRedactor(secrets);
       const evidence = selectAgentEvidence({
         agent: preflight.agent,
         identity: preflight.agentEvidenceIdentity,
         model: input.plan.agent.model,
         sessionId: interaction.sessionId,
         completedTurns: interaction.turns,
-        fallbackTurns: fallbackTurns.value,
+        redactor,
         collected,
       });
       assertEvidenceMatchesRun(
@@ -491,21 +492,19 @@ export async function executeEvalWithTestHooks(
       return {
         evidence,
         nativeArtifact,
-        fallback: {
-          turns: fallbackTurns.value,
-          redactions:
-            fallbackTurns.replacements + interaction.toolResultRedactions,
-        },
+        // Native evidence is redacted whole below; fallback also counts the
+        // result text redacted before the driver ledger's own bound.
+        redactions:
+          evidence.completeness === 'fallback'
+            ? redactor.replacements + interaction.toolResultRedactions
+            : 0,
       };
     });
     const selectedRedacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,
+      selectedEvidence.redactions,
     );
-    if (selectedEvidence.evidence.completeness === 'fallback') {
-      selectedRedacted.replacements +=
-        selectedEvidence.fallback?.redactions ?? 0;
-    }
 
     const evaluated = await step('evaluation', async () => {
       throwIfAborted(signal, phase);
@@ -555,6 +554,7 @@ export async function executeEvalWithTestHooks(
                     'Driver evidence requires a completed agent session.',
                   );
                 }
+                const driverRedactor = createSecretRedactor(secrets);
                 const evidence = createDriverFallbackEvidence(
                   {
                     agent: preflight.agent,
@@ -562,9 +562,7 @@ export async function executeEvalWithTestHooks(
                     model: input.plan.agent.model,
                     sessionId: interaction.sessionId,
                     completedTurns: interaction.turns,
-                    ...(selectedEvidence.fallback === undefined
-                      ? {}
-                      : { fallbackTurns: selectedEvidence.fallback.turns }),
+                    redactor: driverRedactor,
                   },
                   reason,
                 );
@@ -573,10 +571,12 @@ export async function executeEvalWithTestHooks(
                   preflight.agent,
                   interaction.sessionId,
                 );
-                const redacted = redactNormalizedTrajectory(evidence, secrets);
-                redacted.replacements +=
-                  selectedEvidence.fallback?.redactions ?? 0;
-                return redacted;
+                return redactNormalizedTrajectory(
+                  evidence,
+                  secrets,
+                  driverRedactor.replacements +
+                    interaction.toolResultRedactions,
+                );
               },
             });
       const redacted = resolved?.redacted ?? selectedRedacted;
@@ -1644,10 +1644,11 @@ class ReadonlyMapSnapshot<Key, Value> implements ReadonlyMap<Key, Value> {
 function redactNormalizedTrajectory(
   evidence: NormalizedTrajectory,
   secrets: readonly string[],
+  priorReplacements = 0,
 ): { evidence: NormalizedTrajectory; replacements: number } {
   const redacted = redactSecrets(evidence, secrets);
   return {
-    replacements: redacted.replacements,
+    replacements: priorReplacements + redacted.replacements,
     evidence: parseNormalizedTrajectory(redacted.value),
   };
 }
