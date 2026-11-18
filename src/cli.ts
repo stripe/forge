@@ -30,10 +30,6 @@ import {
   runExperimentCommand,
 } from './experimentCli.ts';
 import {
-  DECISION_JUDGE_MODES,
-  decisionJudgeMethod,
-} from './model/judgeMethod.ts';
-import {
   type ExperimentConfigV1,
   type ForgeRuntimeV1,
   getMatrixGroups,
@@ -41,6 +37,10 @@ import {
   parseRunSelection,
   type RunSelection,
 } from './model/index.ts';
+import {
+  DECISION_JUDGE_MODES,
+  decisionJudgeMethod,
+} from './model/judgeMethod.ts';
 import {
   expandExperiment,
   ManifestCaseFileError,
