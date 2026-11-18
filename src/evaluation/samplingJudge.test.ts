@@ -8,6 +8,7 @@ import type {
 } from '../results/types.ts';
 import { createTestResolvedRunPlan } from '../testing/index.ts';
 import { CRITERION_DECISION_QUESTIONS } from './criterionDecision.ts';
+import { LONGEST_CAPTURE_STATUS_WARNINGS } from './criterionEvidence.ts';
 import {
   buildCriterionJudgePrompt,
   type CriterionCompletionInvoker,
@@ -17,7 +18,6 @@ import {
   MAX_CRITERION_JUDGE_ATTEMPTS,
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
 } from './criterionJudge.ts';
-import { LONGEST_CAPTURE_STATUS_WARNINGS } from './criterionEvidence.ts';
 import { buildDecisionPrompt } from './decisionPrompt.ts';
 import { sizeJudgePrompt } from './judgeEvidenceBudget.ts';
 import { createJudgeTranscriptProjection } from './judgeTranscript.ts';
@@ -149,11 +149,12 @@ describe('verbalized-sampling criterion judging', () => {
   });
 
   it('states the capture status the run recorded', () => {
-    const prompt = (
-      evidenceWarnings?: CriterionEvidenceWarningV1[],
-    ) =>
+    const prompt = (evidenceWarnings?: CriterionEvidenceWarningV1[]) =>
       buildCriterionJudgePrompt(
-        { transcript, ...(evidenceWarnings === undefined ? {} : { evidenceWarnings }) },
+        {
+          transcript,
+          ...(evidenceWarnings === undefined ? {} : { evidenceWarnings }),
+        },
         'A.',
         method,
       );
@@ -171,7 +172,9 @@ describe('verbalized-sampling criterion judging', () => {
         [candidate('met', 0.55), candidate('not_met', 0.45)],
         [candidate('not_met', 0.9), candidate('met', 0.1)],
         [candidate('insufficient_evidence', 1)],
-      ].map(async (candidates) => (await judge(async () => reply(candidates)))[0]!),
+      ].map(
+        async (candidates) => (await judge(async () => reply(candidates)))[0]!,
+      ),
     );
     assert.deepEqual(
       results.map(({ passed }) => passed),
@@ -242,7 +245,10 @@ describe('verbalized-sampling criterion judging', () => {
       throw new Error('transport failed');
     });
     assert.equal(result!.error?.type, 'request_error');
-    assert.match(result!.explanation, /^Judge request failed after \d+ attempts\.$/);
+    assert.match(
+      result!.explanation,
+      /^Judge request failed after \d+ attempts\.$/,
+    );
     assert.equal(Object.hasOwn(result!.error!, 'reason'), false);
   });
 
@@ -265,7 +271,9 @@ describe('verbalized-sampling criterion judging', () => {
         const criterion = /Success Criterion:\n(\w+)\./.exec(
           request.systemPrompt,
         )![1]!;
-        return answers[['First', 'Second', 'Third', 'Fourth'].indexOf(criterion)]!;
+        return answers[
+          ['First', 'Second', 'Third', 'Fourth'].indexOf(criterion)
+        ]!;
       },
       { ...noRetryWait, judgeMethod: method },
     );
@@ -369,7 +377,7 @@ describe('sampling prompt budget', () => {
     );
   });
 
-  it('sizes execution and verification from the plan\'s method', () => {
+  it("sizes execution and verification from the plan's method", () => {
     const judge = { provider: 'p', model: 'm' };
     const size = (withMethod: boolean) =>
       sizeJudgePrompt(

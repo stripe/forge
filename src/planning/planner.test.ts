@@ -4,10 +4,7 @@ import { OPEN_CODE_MODEL_PROFILE } from '../../test/support/opencode.ts';
 
 import { sha256Digest } from '../model/hashes.ts';
 import { getMatrixGroups } from '../model/matrix.ts';
-import {
-  parseExperimentConfig,
-  parseResolvedRunPlan,
-} from '../model/parse.ts';
+import { parseExperimentConfig, parseResolvedRunPlan } from '../model/parse.ts';
 import type {
   EvalCaseV1,
   ExperimentConfigV1,

@@ -8,6 +8,12 @@ import {
   agentAdapterMetadataSchema,
   completionProviderMetadataSchema,
 } from '../contracts/metadata.ts';
+import { criterionDecisionSchema } from '../evaluation/criterionDecision.ts';
+import {
+  MAX_CRITERION_EVIDENCE_WARNING_BYTES,
+  MAX_CRITERION_EVIDENCE_WARNINGS,
+} from '../evaluation/criterionEvidence.ts';
+import { DECISION_REJECTION_REASONS } from '../evaluation/decision.ts';
 import {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -17,12 +23,6 @@ import {
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
   parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.ts';
-import { criterionDecisionSchema } from '../evaluation/criterionDecision.ts';
-import {
-  MAX_CRITERION_EVIDENCE_WARNING_BYTES,
-  MAX_CRITERION_EVIDENCE_WARNINGS,
-} from '../evaluation/criterionEvidence.ts';
-import { DECISION_REJECTION_REASONS } from '../evaluation/decision.ts';
 import { scoreEvaluation } from '../evaluation/score.ts';
 import { criterionRequirementWordingIssue } from '../model/criteria.ts';
 import { parseRunSelection } from '../model/index.ts';

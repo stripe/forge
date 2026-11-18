@@ -54,7 +54,8 @@ describe('saved sampling decisions', () => {
       criterion: 'Errored.',
       requirement_level: 'SHOULD',
       passed: null,
-      explanation: 'Judge response rejected: candidates. (unavailable after 3 attempts)',
+      explanation:
+        'Judge response rejected: candidates. (unavailable after 3 attempts)',
       error: {
         type: 'parse_error',
         reason: 'candidates',
@@ -100,8 +101,19 @@ describe('saved sampling decisions', () => {
 
   it('rejects results that contradict their decision or references', () => {
     const good = scoreEvaluation([sampled('unanimous')], [], []);
-    const edit = (change: (value: Record<string, any>) => void) => {
-      const copy = structuredClone(good) as unknown as Record<string, any>;
+    type EditableCriterion = {
+      passed: boolean;
+      decision: Record<string, unknown>;
+    };
+    type Editable = {
+      judging_criteria: [EditableCriterion, ...EditableCriterion[]];
+      judging_criteria_passed: number;
+      score: number;
+      status: string;
+      evidence_warnings?: unknown;
+    };
+    const edit = (change: (value: Editable) => void) => {
+      const copy = structuredClone(good) as unknown as Editable;
       change(copy);
       return () => parseEvaluationResult(copy);
     };
@@ -136,9 +148,18 @@ describe('saved sampling decisions', () => {
   });
 
   it('accepts warning paths that run evidence accepts', () => {
-    const evaluation = scoreEvaluation([sampled('unanimous')], [], [
-      { source: 'trajectory', code: 'x', message: 'm', path: 'logs/a\tb.jsonl' },
-    ]);
+    const evaluation = scoreEvaluation(
+      [sampled('unanimous')],
+      [],
+      [
+        {
+          source: 'trajectory',
+          code: 'x',
+          message: 'm',
+          path: 'logs/a\tb.jsonl',
+        },
+      ],
+    );
     assert.deepEqual(roundTrip(evaluation), evaluation);
   });
 });

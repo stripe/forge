@@ -26,16 +26,43 @@ import {
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(
-    roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })),
+    roots
+      .splice(0)
+      .map((root) => fs.rm(root, { recursive: true, force: true })),
   );
 });
 const model = { provider: 'test-provider', model: 'test-model' };
 const candidates = [
-  { reading: 'Strict.', rationale: 'Strict reading fails.', label: 'not_met', probability: 0.4 },
-  { reading: 'Lenient.', rationale: 'Lenient reading passes.', label: 'met', probability: 0.3 },
-  { reading: 'Final code.', rationale: 'Code passes.', label: 'met', probability: 0.2 },
-  { reading: 'Missing data.', rationale: 'Data is absent.', label: 'insufficient_evidence', probability: 0.05 },
-  { reading: 'Visible behavior.', rationale: 'Behavior passes.', label: 'met', probability: 0.05 },
+  {
+    reading: 'Strict.',
+    rationale: 'Strict reading fails.',
+    label: 'not_met',
+    probability: 0.4,
+  },
+  {
+    reading: 'Lenient.',
+    rationale: 'Lenient reading passes.',
+    label: 'met',
+    probability: 0.3,
+  },
+  {
+    reading: 'Final code.',
+    rationale: 'Code passes.',
+    label: 'met',
+    probability: 0.2,
+  },
+  {
+    reading: 'Missing data.',
+    rationale: 'Data is absent.',
+    label: 'insufficient_evidence',
+    probability: 0.05,
+  },
+  {
+    reading: 'Visible behavior.',
+    rationale: 'Behavior passes.',
+    label: 'met',
+    probability: 0.05,
+  },
 ];
 
 async function run(judge: JudgeModelRefV1, reply: unknown) {
@@ -52,13 +79,19 @@ async function run(judge: JudgeModelRefV1, reply: unknown) {
     composition: {
       runtime: createFakeRuntimeAdapter().adapter,
       agents: new Map([[agent.adapter.id, agent.adapter]]),
-      completionProviders: new Map([[completion.provider.id, completion.provider]]),
+      completionProviders: new Map([
+        [completion.provider.id, completion.provider],
+      ]),
       credentialResolver: createStaticCredentialResolver(),
       inputProvider: createMemoryRunInputProvider(),
       artifactStore: createArtifactStore({ root }),
     },
   });
-  return { completed, completion, verified: await verifyCompletedRun(completed.location) };
+  return {
+    completed,
+    completion,
+    verified: await verifyCompletedRun(completed.location),
+  };
 }
 
 describe('experiment-selected verbalized-sampling judge', () => {
@@ -88,7 +121,10 @@ describe('experiment-selected verbalized-sampling judge', () => {
     assert.equal(criterion.passed, true);
     assert.equal(criterion.decision!.choice, 'met');
     assert.ok(Math.abs(criterion.decision!.probabilities.met - 0.55) < 1e-12);
-    assert.equal(criterion.decision!.thresholded_outcome, 'insufficient_evidence');
+    assert.equal(
+      criterion.decision!.thresholded_outcome,
+      'insufficient_evidence',
+    );
     assert.deepEqual(criterion.decision!.candidates, candidates);
     assert.equal(criterion.explanation, 'Strict reading fails.');
     assert.equal(criterion.evidence_warnings_ref, 'evaluation');
@@ -117,7 +153,10 @@ describe('experiment-selected verbalized-sampling judge', () => {
     assert.doesNotMatch(request.systemPrompt!, /capture status/);
     const { evaluation } = verified.result;
     assert.equal(Object.hasOwn(evaluation, 'evidence_warnings'), false);
-    assert.equal(Object.hasOwn(evaluation.judging_criteria[0]!, 'decision'), false);
+    assert.equal(
+      Object.hasOwn(evaluation.judging_criteria[0]!, 'decision'),
+      false,
+    );
   });
 });
 

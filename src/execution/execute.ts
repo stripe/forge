@@ -52,12 +52,12 @@ import type {
   WorkspaceListOptions,
   WorkspaceWriteOptions,
 } from '../contracts/runtime.ts';
-import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   type RuntimeCredentialDeclaration,
   resolveCredentialDeclarations,
   validateCredentialDeclarations,
 } from '../credentialDeclarations.ts';
+import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,

@@ -53,7 +53,9 @@ export function judgeMethodOf(judge: {
 }): DecisionJudgeMethod | undefined {
   if (judge.mode === undefined) {
     if (judge.candidates !== undefined)
-      throw new TypeError('Judge candidates apply only to verbalized-sampling.');
+      throw new TypeError(
+        'Judge candidates apply only to verbalized-sampling.',
+      );
     return undefined;
   }
   return decisionJudgeMethod(judge.mode, judge.candidates);

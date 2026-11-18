@@ -22,9 +22,9 @@ import type {
 import { boundedErrorMessage } from '../security/errorMessage.ts';
 import {
   CRITERION_DECISION_QUESTIONS,
+  CRITERION_DECISION_THRESHOLDS,
   type CriterionDecisionOption,
   type CriterionDecisionV1,
-  CRITERION_DECISION_THRESHOLDS,
   criterionDecisionOutcome,
 } from './criterionDecision.ts';
 import {
@@ -38,7 +38,10 @@ import {
   InvalidDecisionResponseError,
   parseDecisionAnswers,
 } from './decision.ts';
-import { buildDecisionPrompt, DECISION_OUTPUT_TOKENS } from './decisionPrompt.ts';
+import {
+  buildDecisionPrompt,
+  DECISION_OUTPUT_TOKENS,
+} from './decisionPrompt.ts';
 import {
   type JudgeTranscriptProjectionV1,
   parseJudgeTranscriptProjection,
@@ -346,7 +349,12 @@ async function judgeOneCriterion(
   invoke: CriterionCompletionInvoker,
   options: CriterionJudgeExecutionOptions,
 ): Promise<CriterionResultV1> {
-  const result = await judgeCriterionWithRetries(input, criterion, invoke, options);
+  const result = await judgeCriterionWithRetries(
+    input,
+    criterion,
+    invoke,
+    options,
+  );
   return options.judgeMethod === undefined
     ? result
     : { ...result, evidence_warnings_ref: 'evaluation' };

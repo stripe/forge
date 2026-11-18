@@ -1,4 +1,10 @@
 export {
+  DECISION_JUDGE_MODES,
+  type DecisionJudgeMethod,
+  type DecisionJudgeMode,
+  decisionJudgeMethod,
+} from '../model/judgeMethod.ts';
+export {
   collectWorkspaceEvidence,
   type EvaluatedRunEvidence,
   type EvaluateRunEvidenceInput,
@@ -35,12 +41,6 @@ export {
   DECISION_PROBABILITY_TOLERANCE,
   type DecisionRejectionReason,
 } from './decision.ts';
-export {
-  DECISION_JUDGE_MODES,
-  type DecisionJudgeMethod,
-  type DecisionJudgeMode,
-  decisionJudgeMethod,
-} from '../model/judgeMethod.ts';
 export {
   type JudgeEvidenceBudgetInput,
   type JudgeEvidenceBudgetSelection,

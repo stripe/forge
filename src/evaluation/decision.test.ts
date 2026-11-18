@@ -299,7 +299,10 @@ describe('verbalized-sampling decisions', () => {
       assert.deepEqual(answer.probabilities, decision.probabilities);
       assert.equal(answer.confidence, decision.confidence);
       assert.equal(
-        criterionDecisionOutcome(answer as never, CRITERION_DECISION_THRESHOLDS),
+        criterionDecisionOutcome(
+          answer as never,
+          CRITERION_DECISION_THRESHOLDS,
+        ),
         decision.thresholded_outcome,
       );
       assert.ok(criterionDecisionSchema.safeParse(decision).success);
@@ -325,7 +328,11 @@ describe('saved criterion decisions', () => {
       (d: Record<string, unknown>) => (d.choice = 'not_met'),
       (d: Record<string, unknown>) => (d.thresholded_outcome = 'not_met'),
       (d: Record<string, unknown>) =>
-        (d.probabilities = { met: 0.5, not_met: 0.5, insufficient_evidence: 0 }),
+        (d.probabilities = {
+          met: 0.5,
+          not_met: 0.5,
+          insufficient_evidence: 0,
+        }),
       (d: Record<string, unknown>) => delete d.candidates,
       (d: Record<string, unknown>) => (d.extra = true),
     ]) {

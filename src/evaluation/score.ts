@@ -70,24 +70,25 @@ export function scoreEvaluation(
     judging_criteria_passed: criteriaPassed,
     judging_criteria_total: criteriaTotal,
     judging_criteria_errored: criteriaErrored,
-    judging_criteria: criteria.map((criterion): CriterionResultV1 =>
-      criterion.passed === null
-        ? { ...criterion, error: { ...criterion.error } }
-        : {
-            ...criterion,
-            ...(criterion.decision === undefined
-              ? {}
-              : {
-                  decision: {
-                    ...criterion.decision,
-                    probabilities: { ...criterion.decision.probabilities },
-                    thresholds: { ...criterion.decision.thresholds },
-                    candidates: criterion.decision.candidates.map(
-                      (candidate) => ({ ...candidate }),
-                    ),
-                  },
-                }),
-          },
+    judging_criteria: criteria.map(
+      (criterion): CriterionResultV1 =>
+        criterion.passed === null
+          ? { ...criterion, error: { ...criterion.error } }
+          : {
+              ...criterion,
+              ...(criterion.decision === undefined
+                ? {}
+                : {
+                    decision: {
+                      ...criterion.decision,
+                      probabilities: { ...criterion.decision.probabilities },
+                      thresholds: { ...criterion.decision.thresholds },
+                      candidates: criterion.decision.candidates.map(
+                        (candidate) => ({ ...candidate }),
+                      ),
+                    },
+                  }),
+            },
     ),
     checks: checks.map((check) => ({
       ...check,
