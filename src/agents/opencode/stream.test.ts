@@ -147,7 +147,12 @@ describe('OpenCode live stream', () => {
     assert.equal(result.text, turn.response);
     assert.equal(result.costUsd, 0.01);
     assert.deepEqual(result.toolCalls, [
-      { id: 'prt_abandoned', name: 'bash', input: cleanup.part.state.input },
+      {
+        id: 'prt_abandoned',
+        name: 'bash',
+        input: cleanup.part.state.input,
+        result: { content: 'Tool execution aborted', isError: true },
+      },
     ]);
     assert.deepEqual(parseOpenCodeStream(encode([...events, cleanup])), result);
     // Cleanup after an intermediate finish must still allow the next step.
