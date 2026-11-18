@@ -7,8 +7,41 @@ import type {
   InteractionCompletionInvoker,
   InteractionCompletionRequest,
 } from './completion.ts';
-import { type ConversationTurn, runConversation } from './conversation.ts';
+import {
+  type ConversationTurn,
+  runConversation,
+  snapshotAgentToolCalls,
+} from './conversation.ts';
 import { AVA_STOP_SENTINEL } from './prompt.ts';
+
+it('snapshots tool results so later adapter mutation cannot rewrite evidence', () => {
+  const result = { content: 'original', isError: false };
+  const calls = snapshotAgentToolCalls([{ name: 'Read', result }]);
+  result.content = 'changed';
+  result.isError = true;
+  assert.deepEqual(calls[0]?.result, { content: 'original', isError: false });
+  assert.ok(Object.isFrozen(calls[0]?.result));
+});
+
+it('bounds snapshotted results without splitting an emoji', () => {
+  const prefixLength = 1_048_576;
+  const original = `${'x'.repeat(prefixLength - 1)}😀${'x'.repeat(100)}`;
+  const [call] = snapshotAgentToolCalls([
+    {
+      name: 'Read',
+      result: { content: original, isError: true },
+    },
+  ]);
+  assert.equal(call!.result!.content, 'x'.repeat(prefixLength - 1));
+  assert.equal(call!.result!.truncated, true);
+  assert.equal(call!.result!.isError, true);
+  const exact = 'x'.repeat(1_048_576);
+  assert.deepEqual(
+    snapshotAgentToolCalls([{ name: 'Read', result: { content: exact } }])[0]!
+      .result,
+    { content: exact },
+  );
+});
 
 function initialResponse(
   descriptions: readonly string[],

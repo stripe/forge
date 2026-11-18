@@ -18,6 +18,7 @@ import {
   parseJudgeTranscriptProjection,
 } from '../evaluation/judgeTranscript.ts';
 import { scoreEvaluation } from '../evaluation/score.ts';
+import { MAX_TOOL_RESULT_CODE_UNITS } from '../interaction/toolResult.ts';
 import { criterionRequirementWordingIssue } from '../model/criteria.ts';
 import { parseRunSelection } from '../model/index.ts';
 import {
@@ -196,6 +197,22 @@ const interactionToolCall = z
     id: safeText.optional(),
     name: safeText,
     input: jsonValue.optional(),
+    result: z
+      .object({
+        content: z.string().max(MAX_TOOL_RESULT_CODE_UNITS).optional(),
+        is_error: z.boolean().optional(),
+        omission: z
+          .enum(['non_text_content', 'not_completed', 'output_unavailable'])
+          .optional(),
+        truncated: z.boolean().optional(),
+      })
+      .strict()
+      .refine(
+        ({ content, omission }) =>
+          content !== undefined || omission !== undefined,
+        'A tool result requires content or an omission.',
+      )
+      .optional(),
   })
   .strict();
 
@@ -439,6 +456,7 @@ const judgeEvidenceSchema = z
         // The shared projection parser below validates the complete step schema.
         steps: z.array(z.unknown()),
         omitted: z.literal('judge_budget_exceeded').optional(),
+        warnings: z.array(z.unknown()).optional(),
       })
       .strict()
       .refine(
@@ -919,6 +937,9 @@ export function parseJudgeEvidence(
     copiedContext: transcript.copied_context,
     includedFields: transcript.included_fields,
     transcriptJson: serializeCanonicalJson(transcript.steps),
+    ...(transcript.warnings === undefined
+      ? {}
+      : { warnings: transcript.warnings }),
   });
   return {
     ...evidence,

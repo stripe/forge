@@ -14,6 +14,14 @@ import { serializeCanonicalJson } from '../serialization.ts';
 export const JUDGE_TRANSCRIPT_SOURCE = 'trajectory.json' as const;
 export const JUDGE_TRANSCRIPT_PROJECTION_ID =
   'forge-visible-atif-steps' as const;
+// Retain the strict reader contract for existing excerpt projections. New
+// projections keep complete steps; execution selects by the whole-prompt budget.
+const TRANSCRIPT_OMISSION_MESSAGE =
+  '[Forge truncated the judge transcript to 768 KiB. The prefix and suffix are excerpts of canonical step JSON; intervening evidence is omitted.]';
+const TRANSCRIPT_WARNING = Object.freeze({
+  code: 'transcript_truncated' as const,
+  message: TRANSCRIPT_OMISSION_MESSAGE,
+});
 export const JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE = 'root' as const;
 export const JUDGE_TRANSCRIPT_INCLUDED_STEP_SOURCES = Object.freeze([
   'user',
@@ -73,6 +81,22 @@ export type JudgeVisibleStepV1 =
   | JudgeVisibleUserStepV1
   | JudgeVisibleAgentStepV1;
 
+/**
+ * A previously recorded marked start/end excerpt. It replaces the whole step
+ * list and never sits beside other steps.
+ */
+export interface JudgeTranscriptExcerptV1 {
+  readonly source: 'omission';
+  readonly message: string;
+  readonly prefix: string;
+  readonly suffix: string;
+}
+
+/** Judge-visible transcript content: steps, or a recorded excerpt of them. */
+export type JudgeTranscriptStepsV1 =
+  | readonly JudgeVisibleStepV1[]
+  | readonly [JudgeTranscriptExcerptV1];
+
 /** Exact transcript projection and declared policy supplied to a criterion judge. */
 export interface JudgeTranscriptProjectionV1 {
   readonly source: typeof JUDGE_TRANSCRIPT_SOURCE;
@@ -83,6 +107,11 @@ export interface JudgeTranscriptProjectionV1 {
   readonly includedFields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
   /** Exact canonical JSON supplied to the judge, including its final LF. */
   readonly transcriptJson: string;
+  /** Present on previously recorded marked start/end excerpts. */
+  readonly warnings?: readonly {
+    readonly code: 'transcript_truncated';
+    readonly message: string;
+  }[];
 }
 
 /** Canonical empty transcript with the same declared projection policy. */
@@ -160,7 +189,16 @@ export function parseJudgeTranscriptProjection(
     );
   }
 
-  return makeProjection(canonicalTranscript);
+  const truncated = steps[0]?.source === 'omission';
+  if (
+    serializeCanonicalJson(projection.warnings ?? []) !==
+    serializeCanonicalJson(truncated ? [TRANSCRIPT_WARNING] : [])
+  ) {
+    throw new TypeError(
+      'Judge transcript truncation requires its exact evidence warning.',
+    );
+  }
+  return makeProjection(canonicalTranscript, truncated);
 }
 
 function projectAgentStep(step: AtifAgentStep): JudgeVisibleAgentStepV1 {
@@ -233,7 +271,10 @@ function projectObservationResult(
   return Object.keys(projected).length > 0 ? projected : undefined;
 }
 
-function makeProjection(transcriptJson: string): JudgeTranscriptProjectionV1 {
+function makeProjection(
+  transcriptJson: string,
+  truncated = false,
+): JudgeTranscriptProjectionV1 {
   return Object.freeze({
     source: JUDGE_TRANSCRIPT_SOURCE,
     projectionId: JUDGE_TRANSCRIPT_PROJECTION_ID,
@@ -242,6 +283,7 @@ function makeProjection(transcriptJson: string): JudgeTranscriptProjectionV1 {
     copiedContext: JUDGE_TRANSCRIPT_COPIED_CONTEXT,
     includedFields: JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
     transcriptJson,
+    ...(truncated ? { warnings: Object.freeze([TRANSCRIPT_WARNING]) } : {}),
   });
 }
 
@@ -375,7 +417,7 @@ const AgentStepSchema = z
       }
     }
   });
-const JudgeVisibleStepsSchema = z
+const CompleteStepsSchema = z
   .array(z.union([UserStepSchema, AgentStepSchema]))
   .superRefine((steps, context) => {
     for (let index = 1; index < steps.length; index += 1) {
@@ -388,6 +430,19 @@ const JudgeVisibleStepsSchema = z
       }
     }
   });
+const JudgeVisibleStepsSchema = z.union([
+  CompleteStepsSchema,
+  z.tuple([
+    z
+      .object({
+        source: z.literal('omission'),
+        message: z.literal(TRANSCRIPT_OMISSION_MESSAGE),
+        prefix: z.string().min(1),
+        suffix: z.string().min(1),
+      })
+      .strict(),
+  ]),
+]);
 const ProjectionSchema = z
   .object({
     source: z.literal(JUDGE_TRANSCRIPT_SOURCE),
@@ -410,5 +465,16 @@ const ProjectionSchema = z
       z.literal(JUDGE_TRANSCRIPT_INCLUDED_FIELDS[8]),
     ]),
     transcriptJson: z.string(),
+    warnings: z
+      .array(
+        z
+          .object({
+            code: z.literal(TRANSCRIPT_WARNING.code),
+            message: z.literal(TRANSCRIPT_WARNING.message),
+          })
+          .strict(),
+      )
+      .length(1)
+      .optional(),
   })
   .strict();

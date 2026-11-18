@@ -64,6 +64,46 @@ function paddedEvent(event: unknown, bytes: number) {
 }
 
 describe('OpenCode live stream', () => {
+  it.each(['pending', 'running'])(
+    'rejects a nonterminal %s tool snapshot without inventing an outcome',
+    (status) => {
+      const events = openCodeEvents(turn);
+      const toolEvent = events.find((event) => event.type === 'tool_use')!;
+      toolEvent.part.state = {
+        status,
+        input: { command: 'sleep 600' },
+        output: '',
+      };
+      assert.throws(
+        () => parseOpenCodeStream(encode(events)),
+        OpenCodeStreamError,
+      );
+    },
+  );
+  it('keeps a completed turn when optional tool output is unavailable', () => {
+    const events = openCodeEvents(turn);
+    const toolEvent = events.find((event) => event.type === 'tool_use')!;
+    toolEvent.part.state = { status: 'completed', input: { command: 'true' } };
+    const parsed = parseOpenCodeStream(encode(events));
+    assert.equal(parsed.text, turn.response);
+    assert.deepEqual(parsed.toolCalls[0]?.result, {
+      omission: 'output_unavailable',
+    });
+  });
+  it('reports an errored tool without usable error text as an error with no output', () => {
+    const events = openCodeEvents(turn);
+    const toolEvent = events.find((event) => event.type === 'tool_use')!;
+    toolEvent.part.state = {
+      status: 'error',
+      input: { command: 'true' },
+      error: { code: 1 },
+    };
+    const parsed = parseOpenCodeStream(encode(events));
+    assert.deepEqual(parsed.toolCalls[0]?.result, {
+      omission: 'output_unavailable',
+      isError: true,
+    });
+  });
   it('omits total cost if any finished step lacks cost', () => {
     for (const missing of [[3, 6], [3], [6]]) {
       const events = openCodeEvents(turn);
@@ -107,7 +147,12 @@ describe('OpenCode live stream', () => {
     assert.equal(result.text, turn.response);
     assert.equal(result.costUsd, 0.01);
     assert.deepEqual(result.toolCalls, [
-      { id: 'prt_abandoned', name: 'bash', input: cleanup.part.state.input },
+      {
+        id: 'prt_abandoned',
+        name: 'bash',
+        input: cleanup.part.state.input,
+        result: { content: 'Tool execution aborted', isError: true },
+      },
     ]);
     assert.deepEqual(parseOpenCodeStream(encode([...events, cleanup])), result);
     // Cleanup after an intermediate finish must still allow the next step.
@@ -387,6 +432,7 @@ describe('OpenCode live stream', () => {
         id: 'prt_tool0',
         name: 'bash',
         input: { command: 'printf complete > answer.txt' },
+        result: { content: 'Wrote answer.txt.', isError: false },
       },
     ]);
   });
@@ -403,6 +449,7 @@ describe('OpenCode live stream', () => {
         id: 'prt_tool0',
         name: 'bash',
         input: { command: 'printf complete > answer.txt' },
+        result: { content: 'Command failed.', isError: true },
       },
     ]);
   });

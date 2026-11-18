@@ -113,6 +113,19 @@ describe('credential redaction', () => {
     assert.equal(({} as { token?: string }).token, undefined);
   });
 
+  it('also redacts a credential in the spelling that JSON serialization gives it', () => {
+    const secret = 'quoted"credential\\suffix\tend';
+    const serialized = JSON.stringify({ token: secret });
+    assert.ok(!serialized.includes(secret));
+
+    const result = redactSecrets({ raw: `a ${secret}`, serialized }, [secret]);
+    assert.deepEqual(result.value, {
+      raw: `a ${REDACTED_SECRET}`,
+      serialized: `{"token":"${REDACTED_SECRET}"}`,
+    });
+    assert.equal(result.replacements, 2);
+  });
+
   it('rejects text and UTF-8 bytes without exposing the credential in the error', () => {
     const secret = 'synthetic-café-🔒';
     const body = `before ${secret} after`;

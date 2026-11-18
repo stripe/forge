@@ -1,4 +1,9 @@
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import type {
+  AgentToolCall,
+  AgentToolResult,
+  AgentTurn,
+} from '../../contracts/agent.ts';
+import { textToolResult } from '../toolResult.ts';
 
 const MAX_STREAM_LINES = 100_000;
 const MAX_STREAM_LINE_BYTES = 1024 * 1024;
@@ -8,6 +13,8 @@ interface ClaudeStreamEvent {
   type?: string;
   result?: string;
   session_id?: string;
+  /** Set on messages produced inside a subagent (Task) run. */
+  parent_tool_use_id?: unknown;
   total_cost_usd?: number;
   message?: {
     content?: Array<{
@@ -16,6 +23,9 @@ interface ClaudeStreamEvent {
       text?: string;
       name?: string;
       input?: unknown;
+      tool_use_id?: string;
+      content?: unknown;
+      is_error?: boolean;
     }>;
   };
 }
@@ -23,6 +33,8 @@ interface ClaudeStreamEvent {
 /** Parse one completed `claude --output-format stream-json` invocation. */
 export function parseClaudeStream(stdout: string): AgentTurn {
   const toolCalls: AgentToolCall[] = [];
+  const results = new Map<string, AgentToolResult>();
+  const toolIds = new Set<string>();
   let resultText: string | undefined;
   let lastAssistantText = '';
   let sessionId: string | undefined;
@@ -56,11 +68,31 @@ export function parseClaudeStream(stdout: string): AgentTurn {
             name: block.name,
             ...(block.input === undefined ? {} : { input: block.input }),
           });
+          if (typeof block.id === 'string') toolIds.add(block.id);
           if (toolCalls.length > MAX_TOOL_CALLS) {
             throw new ClaudeStreamError(
               'Claude output exceeded its tool-call limit.',
             );
           }
+        }
+      }
+    } else if (
+      event.type === 'user' &&
+      // Subagent output belongs to separately selected evidence, not the root.
+      typeof event.parent_tool_use_id !== 'string'
+    ) {
+      for (const block of event.message?.content ?? []) {
+        if (
+          block.type === 'tool_result' &&
+          typeof block.tool_use_id === 'string' &&
+          toolIds.has(block.tool_use_id)
+        ) {
+          results.set(block.tool_use_id, {
+            ...textToolResult(block.content),
+            ...(typeof block.is_error === 'boolean'
+              ? { isError: block.is_error }
+              : {}),
+          });
         }
       }
     } else if (event.type === 'result') {
@@ -84,7 +116,10 @@ export function parseClaudeStream(stdout: string): AgentTurn {
   return {
     text: resultText ?? lastAssistantText,
     sessionId,
-    toolCalls,
+    toolCalls: toolCalls.map((call) => {
+      const result = call.id === undefined ? undefined : results.get(call.id);
+      return result === undefined ? call : { ...call, result };
+    }),
     ...(costUsd === undefined ? {} : { costUsd }),
   };
 }

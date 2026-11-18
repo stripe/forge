@@ -2,6 +2,109 @@ import assert from 'node:assert/strict';
 import { it } from 'vitest';
 import { ClaudeStreamError, parseClaudeStream } from './stream.ts';
 
+it('correlates tool results by ID and marks omitted media without retaining its bytes', () => {
+  const parsed = parseClaudeStream(
+    [
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'a',
+              name: 'Read',
+              input: { path: 'a.txt' },
+            },
+            { type: 'tool_use', id: 'b', name: 'Read' },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'b',
+              content: 'failure',
+              is_error: true,
+            },
+            {
+              type: 'tool_result',
+              tool_use_id: 'a',
+              content: [
+                { type: 'text', text: 'success' },
+                { type: 'image', source: { data: 'private-image-bytes' } },
+              ],
+            },
+          ],
+        },
+      },
+      { type: 'result', session_id: 'selected', result: 'done' },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join('\n'),
+  );
+  assert.deepEqual(parsed.toolCalls[1]?.result, {
+    content: 'failure',
+    isError: true,
+  });
+  assert.deepEqual(parsed.toolCalls[0]?.result, {
+    content: 'success',
+    omission: 'non_text_content',
+  });
+  assert.doesNotMatch(JSON.stringify(parsed), /private-image-bytes/);
+});
+
+it('retains only root tool results when subagent messages carry a parent tool ID', () => {
+  const parsed = parseClaudeStream(
+    [
+      {
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', id: 'task', name: 'Task' }],
+        },
+      },
+      {
+        type: 'assistant',
+        parent_tool_use_id: 'task',
+        message: {
+          content: [{ type: 'tool_use', id: 'inner', name: 'Read' }],
+        },
+      },
+      {
+        type: 'user',
+        parent_tool_use_id: 'task',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'inner', content: 'private' },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        parent_tool_use_id: null,
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'task', content: 'summary' },
+          ],
+        },
+      },
+      { type: 'result', session_id: 'selected', result: 'done' },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join('\n'),
+  );
+  assert.deepEqual(
+    parsed.toolCalls.map(({ id, result }) => [id, result]),
+    [
+      ['task', { content: 'summary' }],
+      ['inner', undefined],
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(parsed), /private/);
+});
+
 it('ignores bounded banner and primitive noise while retaining terminal text, calls, and valid cost', () => {
   const stream = [
     'Claude banner',

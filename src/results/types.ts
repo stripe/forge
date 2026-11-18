@@ -2,6 +2,7 @@ import type {
   AtifNormalizationCompleteness,
   AtifNormalizationWarning,
 } from '../atif/index.ts';
+import type { AgentToolResultOmission } from '../contracts/agent.ts';
 import type { CompletionProviderErrorCode } from '../contracts/completionObservation.ts';
 import type {
   AgentAdapterMetadata,
@@ -14,7 +15,8 @@ import type {
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
-  JudgeVisibleStepV1,
+  JudgeTranscriptProjectionV1,
+  JudgeTranscriptStepsV1,
 } from '../evaluation/judgeTranscript.ts';
 import type {
   JsonObject,
@@ -165,10 +167,20 @@ export interface CompletionCallSummaryV1 extends CompletionSubattemptRecordV1 {
   readonly error_code: string | null;
 }
 
+/** A tool's observed result, bounded to 1,048,576 UTF-16 code units of text. */
+export interface InteractionToolResultV1 {
+  readonly content?: string;
+  readonly is_error?: boolean;
+  readonly omission?: AgentToolResultOmission;
+  /** Forge cut `content` at the size limit. */
+  readonly truncated?: boolean;
+}
+
 export interface InteractionToolCallV1 {
   readonly id?: string;
   readonly name: string;
   readonly input?: JsonValue;
+  readonly result?: InteractionToolResultV1;
 }
 
 export interface InteractionTurnV1 {
@@ -245,9 +257,10 @@ export interface JudgeEvidenceV1 {
     readonly copied_context: typeof JUDGE_TRANSCRIPT_COPIED_CONTEXT;
     readonly included_fields: typeof JUDGE_TRANSCRIPT_INCLUDED_FIELDS;
     /** Canonical serialization of these steps is the judge's transcript input. */
-    readonly steps: readonly JudgeVisibleStepV1[];
+    readonly steps: JudgeTranscriptStepsV1;
     /** Present only when driver evidence exceeds the whole-prompt budget. */
     readonly omitted?: 'judge_budget_exceeded';
+    readonly warnings?: JudgeTranscriptProjectionV1['warnings'];
   };
   readonly workspace: {
     readonly entries: readonly JudgeWorkspaceEntryV1[];

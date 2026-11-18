@@ -79,6 +79,12 @@ import {
   type ConversationTurn,
   runConversation,
 } from '../interaction/index.ts';
+import {
+  boundToolResult,
+  interactionToolResult,
+  MAX_RUN_TOOL_RESULT_CODE_UNITS,
+  MAX_TOOL_RESULT_CODE_UNITS,
+} from '../interaction/toolResult.ts';
 import { hasDeterministicWorkspaceChecks } from '../model/checks.ts';
 import { sha256Digest } from '../model/hashes.ts';
 import {
@@ -114,6 +120,7 @@ import { boundedErrorMessage } from '../security/errorMessage.ts';
 import {
   assertNoSecrets,
   assertNoSecretsInJsonValue,
+  createSecretRedactor,
   redactSecrets,
 } from '../security/redaction.ts';
 import { serializeCanonicalJson } from '../serialization.ts';
@@ -447,6 +454,7 @@ export async function executeEvalWithTestHooks(
         input.plan,
         session,
         completions,
+        secrets,
         signal,
         hooks.waitBeforeCompletionRetry,
         retryOptions,
@@ -491,12 +499,14 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
+      const redactor = createSecretRedactor(secrets);
       const evidence = selectAgentEvidence({
         agent: preflight.agent,
         identity: preflight.agentEvidenceIdentity,
         model: input.plan.agent.model,
         sessionId: interaction.sessionId,
         completedTurns: interaction.turns,
+        redactor,
         collected,
       });
       assertEvidenceMatchesRun(
@@ -504,11 +514,21 @@ export async function executeEvalWithTestHooks(
         preflight.agent,
         interaction.sessionId,
       );
-      return { evidence, nativeArtifact };
+      return {
+        evidence,
+        nativeArtifact,
+        // Native evidence is redacted whole below; fallback also counts the
+        // result text redacted before the driver ledger's own bound.
+        redactions:
+          evidence.completeness === 'fallback'
+            ? redactor.replacements + interaction.toolResultRedactions
+            : 0,
+      };
     });
     const selectedRedacted = redactNormalizedTrajectory(
       selectedEvidence.evidence,
       secrets,
+      selectedEvidence.redactions,
     );
 
     const evaluated = await step('evaluation', async () => {
@@ -561,6 +581,7 @@ export async function executeEvalWithTestHooks(
                     'Driver evidence requires a completed agent session.',
                   );
                 }
+                const driverRedactor = createSecretRedactor(secrets);
                 const evidence = createDriverFallbackEvidence(
                   {
                     agent: preflight.agent,
@@ -568,6 +589,7 @@ export async function executeEvalWithTestHooks(
                     model: input.plan.agent.model,
                     sessionId: interaction.sessionId,
                     completedTurns: interaction.turns,
+                    redactor: driverRedactor,
                   },
                   reason,
                 );
@@ -576,7 +598,12 @@ export async function executeEvalWithTestHooks(
                   preflight.agent,
                   interaction.sessionId,
                 );
-                return redactNormalizedTrajectory(evidence, secrets);
+                return redactNormalizedTrajectory(
+                  evidence,
+                  secrets,
+                  driverRedactor.replacements +
+                    interaction.toolResultRedactions,
+                );
               },
             });
       const redacted = resolved?.redacted ?? selectedRedacted;
@@ -636,6 +663,9 @@ export async function executeEvalWithTestHooks(
               ...(resolved.reason === 'judge_budget_exceeded'
                 ? { omitted: 'judge_budget_exceeded' }
                 : {}),
+              ...(judgeTranscript.warnings === undefined
+                ? {}
+                : { warnings: judgeTranscript.warnings }),
             },
             workspace,
           },
@@ -800,17 +830,21 @@ interface ExecutedInteraction {
   readonly sessionId: string | null;
   readonly avaAudit?: AvaConversationAudit;
   readonly failure: RolePlayerErrorV1 | null;
+  readonly toolResultRedactions: number;
 }
 
 async function executeInteraction(
   plan: ResolvedRunPlanV1,
   session: AgentSession,
   completions: PreparedCompletionRuntime,
+  secrets: readonly string[],
   signal: AbortSignal,
   waitBeforeCompletionRetry: ExecuteEvalTestHooks['waitBeforeCompletionRetry'],
   retryOptions: CompletionRetryOptions,
 ): Promise<ExecutedInteraction> {
   let lastTurnSessionId: string | undefined;
+  let toolResultRedactions = 0;
+  const resultBudget = { remaining: MAX_RUN_TOOL_RESULT_CODE_UNITS };
   const trackedSession: AgentSession = Object.freeze({
     sessionId: () => session.sessionId(),
     async send(
@@ -828,7 +862,13 @@ async function executeInteraction(
           'Agent changed session identity before a completed turn.',
         );
       }
-      const turn = snapshotAgentTurn(await session.send(message, options));
+      const snapshot = snapshotAgentTurn(
+        await session.send(message, options),
+        secrets,
+        resultBudget,
+      );
+      const turn = snapshot.turn;
+      toolResultRedactions += snapshot.toolResultRedactions;
       if (
         (declaredBeforeTurn !== undefined &&
           declaredBeforeTurn !== turn.sessionId) ||
@@ -871,6 +911,7 @@ async function executeInteraction(
       totalCostUsd: response.costUsd ?? null,
       sessionId: resolveSessionId(session, lastTurnSessionId, true),
       failure: null,
+      toolResultRedactions,
     });
   }
 
@@ -925,10 +966,15 @@ async function executeInteraction(
     ),
     avaAudit: conversation.avaAudit,
     failure,
+    toolResultRedactions,
   });
 }
 
-function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
+function snapshotAgentTurn(
+  turn: AgentTurn,
+  secrets: readonly string[],
+  resultBudget: { remaining: number },
+): { turn: AgentTurn; toolResultRedactions: number } {
   if (
     !turn ||
     typeof turn.text !== 'string' ||
@@ -945,17 +991,54 @@ function snapshotAgentTurn(turn: AgentTurn): AgentTurn {
     if (
       !call ||
       !isSafeToolMetadata(call.name) ||
-      (call.id !== undefined && !isSafeToolMetadata(call.id))
+      (call.id !== undefined && !isSafeToolMetadata(call.id)) ||
+      (call.result !== undefined && !isValidToolResult(call.result))
     ) {
       throw new TypeError('Agent returned an invalid tool call.');
     }
   }
-  return Object.freeze({
-    text: turn.text,
-    sessionId: turn.sessionId,
-    toolCalls: snapshotAgentToolCalls(turn.toolCalls),
-    ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
+  let toolResultRedactions = 0;
+  const toolCalls = turn.toolCalls.map((call) => {
+    if (call.result === undefined) return call;
+    // Only Forge decides `truncated`, so adapter-supplied values are dropped.
+    const { content, isError, omission } = call.result;
+    const observed = {
+      ...(isError === undefined ? {} : { isError }),
+      ...(omission === undefined ? {} : { omission }),
+    };
+    if (content === undefined) return { ...call, result: observed };
+    const redacted = redactSecrets(content, secrets);
+    toolResultRedactions += redacted.replacements;
+    const result = boundToolResult(
+      { ...observed, content: redacted.value },
+      Math.min(MAX_TOOL_RESULT_CODE_UNITS, resultBudget.remaining),
+    );
+    resultBudget.remaining -= result.content?.length ?? 0;
+    return { ...call, result };
   });
+  return {
+    turn: Object.freeze({
+      text: turn.text,
+      sessionId: turn.sessionId,
+      toolCalls: snapshotAgentToolCalls(toolCalls),
+      ...(turn.costUsd === undefined ? {} : { costUsd: turn.costUsd }),
+    }),
+    toolResultRedactions,
+  };
+}
+
+function isValidToolResult(result: unknown): boolean {
+  if (result === null || typeof result !== 'object') return false;
+  const { content, isError, omission } = result as Record<string, unknown>;
+  return (
+    (content === undefined || typeof content === 'string') &&
+    (isError === undefined || typeof isError === 'boolean') &&
+    (omission === undefined ||
+      omission === 'non_text_content' ||
+      omission === 'not_completed' ||
+      omission === 'output_unavailable') &&
+    (content !== undefined || omission !== undefined)
+  );
 }
 
 function resolveSessionId(
@@ -1634,10 +1717,11 @@ class ReadonlyMapSnapshot<Key, Value> implements ReadonlyMap<Key, Value> {
 function redactNormalizedTrajectory(
   evidence: NormalizedTrajectory,
   secrets: readonly string[],
+  priorReplacements = 0,
 ): { evidence: NormalizedTrajectory; replacements: number } {
   const redacted = redactSecrets(evidence, secrets);
   return {
-    replacements: redacted.replacements,
+    replacements: priorReplacements + redacted.replacements,
     evidence: parseNormalizedTrajectory(redacted.value),
   };
 }
@@ -1700,6 +1784,9 @@ function buildInteractionArtifact(
     tool_calls: turn.toolCalls.map((call) => ({
       ...(call.id === undefined ? {} : { id: call.id }),
       name: call.name,
+      ...(call.result === undefined
+        ? {}
+        : { result: interactionToolResult(call.result) }),
       ...(call.input === undefined ? {} : { input: jsonValue(call.input) }),
     })),
   }));
@@ -1745,7 +1832,8 @@ function redactInteractionArtifact(
   artifact: InteractionArtifactV1,
   secrets: readonly string[],
 ): InteractionArtifactV1 {
-  return parseInteractionArtifact(redactSecrets(artifact, secrets).value, {
+  const redacted = redactSecrets(artifact, secrets).value;
+  return parseInteractionArtifact(redacted, {
     forgeVersion: FORGE_VERSION,
   });
 }

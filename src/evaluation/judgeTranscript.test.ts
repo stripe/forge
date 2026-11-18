@@ -11,7 +11,9 @@ import {
   JUDGE_TRANSCRIPT_PROJECTION_ID,
   JUDGE_TRANSCRIPT_SOURCE,
   JUDGE_TRANSCRIPT_TRAJECTORY_SCOPE,
+  type JudgeTranscriptExcerptV1,
   type JudgeTranscriptProjectionV1,
+  type JudgeTranscriptStepsV1,
   type JudgeVisibleStepV1,
   parseJudgeTranscriptProjection,
 } from './judgeTranscript.ts';
@@ -282,6 +284,42 @@ describe('createJudgeTranscriptProjection', () => {
 });
 
 describe('parseJudgeTranscriptProjection', () => {
+  it('retains strict parsing of recorded excerpts and their warnings', () => {
+    const message =
+      '[Forge truncated the judge transcript to 768 KiB. The prefix and suffix are excerpts of canonical step JSON; intervening evidence is omitted.]';
+    const projection = {
+      ...createJudgeTranscriptProjection(richTrajectory()),
+      transcriptJson: serializeCanonicalJson([
+        { source: 'omission', message, prefix: '[', suffix: ']\n' },
+      ]),
+      warnings: [{ code: 'transcript_truncated' as const, message }],
+    };
+    assert.deepEqual(parseJudgeTranscriptProjection(projection), projection);
+    // An excerpt replaces the whole step list; the types keep it out of steps.
+    const excerpt: JudgeTranscriptExcerptV1 = {
+      source: 'omission',
+      message,
+      prefix: '[',
+      suffix: ']\n',
+    };
+    const excerptSteps: JudgeTranscriptStepsV1 = [excerpt];
+    assert.equal(excerptSteps.length, 1);
+    // @ts-expect-error an excerpt is not a per-step variant
+    const mixed: readonly JudgeVisibleStepV1[] = [excerpt];
+    assert.equal(mixed.length, 1);
+    const { warnings: _, ...withoutWarning } = projection;
+    assert.throws(
+      () => parseJudgeTranscriptProjection(withoutWarning),
+      /exact evidence warning/,
+    );
+    assert.throws(() =>
+      parseJudgeTranscriptProjection({
+        ...projection,
+        warnings: [{ code: 'transcript_truncated', message: 'changed' }],
+      }),
+    );
+  });
+
   it('accepts a factory projection and returns a fresh frozen value', () => {
     const created = createJudgeTranscriptProjection(richTrajectory());
     const parsed = parseJudgeTranscriptProjection(structuredClone(created));

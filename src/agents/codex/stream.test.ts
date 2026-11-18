@@ -56,6 +56,40 @@ function assertInvalid(
 }
 
 describe('Codex exec stream', () => {
+  it('marks started-only commands and MCP calls as unavailable, without claiming success', () => {
+    const parsed = parseCodexStream(
+      stream(
+        item(
+          'command_execution',
+          {
+            id: 'unfinished-command',
+            command: 'sleep 600',
+            aggregated_output: '',
+            exit_code: null,
+            status: 'in_progress',
+          },
+          'started',
+        ),
+        item(
+          'mcp_tool_call',
+          {
+            id: 'unfinished-mcp',
+            server: 'sample',
+            tool: 'inspect',
+            arguments: {},
+            status: 'in_progress',
+            result: { content: [] },
+          },
+          'started',
+        ),
+      ),
+    );
+    for (const call of parsed.toolCalls) {
+      assert.deepEqual(call.result, { omission: 'not_completed' });
+    }
+    assert.equal(parsed.toolCalls.length, 2);
+  });
+
   it('accepts the pinned CLI model-metadata advisory only for the selected model before the turn', () => {
     const notice = (model: string) =>
       `Model metadata for \`${model}\` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.`;
@@ -215,6 +249,7 @@ describe('Codex exec stream', () => {
             id: 'item_1',
             name: 'command_execution',
             input: { command: 'bash -lc ls' },
+            result: { omission: 'not_completed' },
           },
         ],
       },
@@ -259,6 +294,7 @@ describe('Codex exec stream', () => {
             id: 'item_1',
             name: 'command_execution',
             input: { command: 'pwd' },
+            result: { content: '/workspace\n', isError: false },
           },
         ],
       },
@@ -389,7 +425,12 @@ describe('Codex exec stream', () => {
             name: 'file_change',
             input: { changes: change },
           })),
-          { id: 'item_4', name: 'command_execution', input: { command } },
+          {
+            id: 'item_4',
+            name: 'command_execution',
+            input: { command },
+            result: { content: '      27 codex-tool.txt\n', isError: false },
+          },
         ],
       },
     );
@@ -418,7 +459,16 @@ describe('Codex exec stream', () => {
     assert.deepEqual(parsed, {
       text: 'Done.',
       sessionId: SESSION_ID,
-      toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+      toolCalls: [
+        {
+          id: 'call',
+          name: 'mcp__fixture__probe',
+          input: {},
+          result: {
+            content: 'Synthetic answer.\nStructured result:\n{"answer":42}',
+          },
+        },
+      ],
     });
   });
 
@@ -439,7 +489,14 @@ describe('Codex exec stream', () => {
       assert.deepEqual(parsed, {
         text: '',
         sessionId: SESSION_ID,
-        toolCalls: [{ id: 'call', name: 'mcp__fixture__probe', input: {} }],
+        toolCalls: [
+          {
+            id: 'call',
+            name: 'mcp__fixture__probe',
+            input: {},
+            result: { content: '' },
+          },
+        ],
       });
     }
   });
@@ -529,14 +586,54 @@ describe('Codex exec stream', () => {
     );
     assert.deepEqual(parsed.toolCalls, [
       { id: 'file', name: 'file_change', input: { changes } },
-      { id: 'mcp', name: 'mcp__docs__search', input: argumentsValue },
+      {
+        id: 'mcp',
+        name: 'mcp__docs__search',
+        input: argumentsValue,
+        result: { content: 'Found it.\nStructured result:\n{"count":1}' },
+      },
       { id: 'web', name: 'web_search', input: { query: 'example', action } },
       { id: 'todos', name: 'todo_list', input: { items: todos } },
-      { id: 'command', name: 'command_execution', input: { command: 'false' } },
-      { id: 'failed-mcp', name: 'mcp__docs__search', input: {} },
+      {
+        id: 'command',
+        name: 'command_execution',
+        input: { command: 'false' },
+        result: { content: '', isError: true },
+      },
+      {
+        id: 'failed-mcp',
+        name: 'mcp__docs__search',
+        input: {},
+        result: { content: 'Tool unavailable.', isError: true },
+      },
     ]);
     assert.equal(parsed.text, '');
   });
+
+  it.each([
+    { status: 'failed', exit_code: null, isError: true },
+    { status: 'completed', exit_code: 2, isError: true },
+    { status: 'completed', exit_code: 0, isError: false },
+    { status: 'completed', exit_code: null, isError: false },
+  ])(
+    'derives a command error from either signal alone ($status, exit $exit_code)',
+    ({ status, exit_code, isError }) => {
+      const parsed = parseCodexStream(
+        stream(
+          item('command_execution', {
+            command: 'run',
+            status,
+            aggregated_output: 'output',
+            exit_code,
+          }),
+        ),
+      );
+      assert.deepEqual(parsed.toolCalls[0]?.result, {
+        content: 'output',
+        isError,
+      });
+    },
+  );
 
   it('requires the exact resume identity and does not manufacture it from the requested ID', () => {
     assert.equal(parseCodexStream(stream(), SESSION_ID).sessionId, SESSION_ID);

@@ -1,5 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { AgentToolCall, AgentTurn } from '../../contracts/agent.ts';
+import type {
+  AgentToolCall,
+  AgentToolResult,
+  AgentTurn,
+} from '../../contracts/agent.ts';
 import {
   identifier,
   MAX_NATIVE_BYTES,
@@ -125,7 +129,7 @@ export function parseOpenCodeStream(
             throw new Error();
           const call = tool(part);
           if (calls.size >= 2_000) throw new Error();
-          calls.set(partId, call);
+          calls.set(partId, { ...call, result: toolResult(state) });
           messageHasTools = true;
           // Cleanup records the abandoned attempt, not a new model step.
         } else if (
@@ -143,10 +147,11 @@ export function parseOpenCodeStream(
           string(part.text);
         } else if (event.type === 'tool_use' && part.type === 'tool') {
           const call = tool(part);
+          const state = record(part.state);
           stepHasTools = true;
           messageHasTools = true;
           if (calls.size >= 2_000) throw new Error();
-          calls.set(partId, call);
+          calls.set(partId, { ...call, result: toolResult(state) });
         } else throw new Error();
       }
     }
@@ -171,4 +176,15 @@ export class OpenCodeStreamError extends Error {
     );
     this.name = 'OpenCodeStreamError';
   }
+}
+
+/** Report what a terminal tool snapshot states, as observed facts. */
+function toolResult(state: Record<string, unknown>): AgentToolResult {
+  const output = state.status === 'error' ? state.error : state.output;
+  return typeof output === 'string'
+    ? { content: output, isError: state.status === 'error' }
+    : {
+        omission: 'output_unavailable',
+        ...(state.status === 'error' ? { isError: true } : {}),
+      };
 }

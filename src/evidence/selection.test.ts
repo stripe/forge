@@ -6,6 +6,7 @@ import type {
   AgentNativeEvidenceResult,
   AgentToolCall,
 } from '../contracts/agent.ts';
+import { createSecretRedactor } from '../security/redaction.ts';
 import {
   type CompletedEvidenceTurn,
   parseAgentEvidenceIdentity,
@@ -19,8 +20,43 @@ const agent = {
   version: 'adapter-1',
 } as AgentAdapter;
 const identity = { name: 'test-agent-binary', version: '2.0.0' };
+const UNAVAILABLE = {
+  code: 'source_unavailable' as const,
+  message: 'No native source.',
+};
 
 describe('selectAgentEvidence', () => {
+  it('keeps bounded argument text and correlated tool output with visible truncation', () => {
+    const selected = select(
+      completeNativeSteps(),
+      {
+        kind: 'unavailable',
+        reason: { code: 'source_invalid', message: 'No native source.' },
+      },
+      [
+        {
+          id: 'read',
+          name: 'Read',
+          input: { command: `START${'x'.repeat(10_000)}` },
+          result: { content: `OUTPUT${'x'.repeat(20_000)}`, isError: true },
+        },
+      ],
+    );
+    const step = selected.trajectory.steps[1]!;
+    assert.equal(step.source, 'agent');
+    const argumentsText =
+      step.tool_calls?.[0]?.arguments.forge_truncated_arguments;
+    assert.equal(typeof argumentsText, 'string');
+    assert.match(String(argumentsText), /START/);
+    assert.match(String(argumentsText), /Forge truncated/);
+    assert.ok(String(argumentsText).length <= 4096);
+    const result = step.observation?.results[0];
+    assert.equal(result?.source_call_id, 'read');
+    assert.equal(result?.extra?.is_error, true);
+    assert.match(String(result?.content), /^OUTPUT.*Forge truncated/s);
+    assert.ok(String(result?.content).length <= 8192);
+    assert.ok(selected.warnings.some(({ code }) => code === 'value_omitted'));
+  });
   it('prefers structurally complete native detail despite lossy projection differences', () => {
     const selected = select([
       { step_id: 1, source: 'user', message: 'First prompt' },
@@ -242,7 +278,9 @@ describe('selectAgentEvidence', () => {
         firstAgentStep.message.length < longAssistant.length,
     );
     assert.equal(firstAgentStep?.tool_calls?.length, 256);
-    assert.deepEqual(firstAgentStep?.tool_calls?.[0]?.arguments, {});
+    assert.deepEqual(firstAgentStep?.tool_calls?.[0]?.arguments, {
+      value: 'x'.repeat(300),
+    });
     assert.deepEqual(
       selected.warnings.map(({ code }) => code),
       ['source_unavailable', 'value_omitted', 'fallback_used'],
@@ -330,6 +368,9 @@ describe('selectAgentEvidence', () => {
       (value) => ({ value }),
       null,
     );
+    const omittedArguments = {
+      forge_omitted_arguments: '[Forge omitted unavailable tool arguments.]',
+    };
     const cases: readonly {
       input: unknown;
       expected: Record<string, unknown>;
@@ -343,25 +384,35 @@ describe('selectAgentEvidence', () => {
       },
       { input: 'argument', expected: { value: 'argument' }, omitted: false },
       { input: [1, 2], expected: { value: [1, 2] }, omitted: false },
-      { input: cyclic, expected: {}, omitted: true },
+      { input: cyclic, expected: omittedArguments, omitted: true },
       {
         input: { value: Number.POSITIVE_INFINITY },
-        expected: {},
+        expected: omittedArguments,
         omitted: true,
       },
-      { input: { value: 1n }, expected: {}, omitted: true },
-      { input: { value: undefined }, expected: {}, omitted: true },
+      { input: { value: 1n }, expected: omittedArguments, omitted: true },
+      {
+        input: { value: undefined },
+        expected: omittedArguments,
+        omitted: true,
+      },
       {
         input: { value: new Map([['key', 'value']]) },
-        expected: {},
+        expected: omittedArguments,
         omitted: true,
       },
       {
         input: JSON.parse('{"__proto__":{"polluted":true},"path":"safe.txt"}'),
-        expected: {},
+        expected: omittedArguments,
         omitted: true,
       },
-      { input: deep, expected: {}, omitted: true },
+      {
+        input: deep,
+        expected: {
+          forge_truncated_arguments: `${JSON.stringify(deep)}\n[Forge truncated driver evidence.]`,
+        },
+        omitted: true,
+      },
     ];
 
     for (const [index, { input, expected, omitted }] of cases.entries()) {
@@ -744,6 +795,198 @@ describe('Codex native completed-turn coverage', () => {
         selected.provenance.source,
       ),
       true,
+    );
+  });
+});
+
+describe('driver fallback redaction', () => {
+  const secret = 'synthetic-private-token';
+
+  function fallback(toolCalls: readonly AgentToolCall[], assistant = 'Done.') {
+    const redactor = createSecretRedactor([secret]);
+    const selected = selectAgentEvidence({
+      agent,
+      identity,
+      model: 'test-model',
+      sessionId: SESSION_ID,
+      completedTurns: [{ user: 'Prompt', assistant, toolCalls }],
+      redactor,
+      collected: { kind: 'unavailable', reason: UNAVAILABLE },
+    });
+    return { selected, redactor };
+  }
+
+  it('redacts values before cutting them and counts replacements made before the cut', () => {
+    const { selected, redactor } = fallback(
+      [
+        {
+          id: 'call',
+          name: 'Tool',
+          input: { query: `${'q'.repeat(4000)}${secret}${'q'.repeat(500)}` },
+          result: { content: `${'r'.repeat(8180)}${secret}${'r'.repeat(50)}` },
+        },
+      ],
+      `${'a'.repeat(8 * 1024 * 1024 - 5)}${secret}`,
+    );
+    const text = JSON.stringify(selected.trajectory);
+    assert.equal(text.includes('synthetic-private'), false);
+    assert.equal(text.includes('private-token'), false);
+    // Only the result's replacement survives its cut; the assistant and
+    // argument replacements fall after theirs but are still counted.
+    assert.equal(text.split('[REDACTED]').length - 1, 1);
+    assert.equal(redactor.replacements, 3);
+  });
+
+  it('does not count secrets in tool calls that the call budget drops', () => {
+    const calls = Array.from({ length: 300 }, (_, index) => ({
+      id: `call-${index}`,
+      name: 'Tool',
+      input: { value: index === 0 || index === 299 ? secret : 'plain' },
+    }));
+    const { selected, redactor } = fallback(calls);
+    assert.equal(selected.trajectory.steps[1]?.tool_calls?.length, 256);
+    assert.equal(redactor.replacements, 1);
+  });
+
+  it('marks non-JSON input omitted instead of failing redaction', () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const { selected, redactor } = fallback([
+      { name: 'Tool', input: cyclic },
+      { name: 'Tool', input: { value: 1n } },
+    ]);
+    const omitted = {
+      forge_omitted_arguments: '[Forge omitted unavailable tool arguments.]',
+    };
+    assert.deepEqual(
+      selected.trajectory.steps[1]?.tool_calls?.map((call) => call.arguments),
+      [omitted, omitted],
+    );
+    assert.equal(redactor.replacements, 0);
+  });
+});
+
+describe('driver fallback tool results', () => {
+  const cut = '\n[Forge truncated driver evidence.]';
+  const resultsOf = (calls: readonly AgentToolCall[]) => {
+    const { selected } = fallbackOf(calls);
+    const step = selected.trajectory.steps[1];
+    return step?.source === 'agent' ? step.observation?.results : undefined;
+  };
+
+  function fallbackOf(toolCalls: readonly AgentToolCall[]) {
+    const selected = selectAgentEvidence({
+      agent,
+      identity,
+      model: 'test-model',
+      sessionId: SESSION_ID,
+      completedTurns: [{ user: 'Prompt', assistant: 'Done.', toolCalls }],
+      collected: { kind: 'unavailable', reason: UNAVAILABLE },
+    });
+    return { selected };
+  }
+
+  it('renders each Forge marker once from the reported omission, without an error claim', () => {
+    const results = resultsOf([
+      { id: 'a', name: 'T', result: { omission: 'not_completed' } },
+      { id: 'b', name: 'T', result: { omission: 'output_unavailable' } },
+      {
+        id: 'c',
+        name: 'T',
+        result: { content: 'text', omission: 'non_text_content' },
+      },
+      { id: 'd', name: 'T', result: { content: 'cut', truncated: true } },
+      { id: 'e', name: 'T', result: { content: 'out', isError: false } },
+      { id: 'f', name: 'T', result: { content: '' } },
+    ]);
+    assert.deepEqual(
+      results?.map(({ content }) => content),
+      [
+        '[Forge tool result unavailable: the call did not complete.]',
+        '[Forge tool result unavailable: the call reported no output.]',
+        'text\n[Forge omitted non-text tool result content.]',
+        'cut\n[Forge truncated the tool result.]',
+        'out',
+        '',
+      ],
+    );
+    assert.deepEqual(
+      results?.map(({ extra }) => extra),
+      [
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { is_error: false },
+        undefined,
+      ],
+    );
+  });
+
+  it('keeps the marker when a long result is cut', () => {
+    const results = resultsOf([
+      {
+        id: 'a',
+        name: 'T',
+        result: { content: 'x'.repeat(9000), truncated: true },
+      },
+    ]);
+    const content = String(results?.[0]?.content ?? '');
+    assert.ok(content.endsWith(`${cut}\n[Forge truncated the tool result.]`));
+    assert.ok(content.length <= 8192);
+  });
+
+  it('never splits a surrogate pair at the argument or result cut', () => {
+    const argumentEnd = 4096 - cut.length;
+    const argumentPrefix = '{"v":"';
+    const argumentBody = 'x'.repeat(argumentEnd - 1 - argumentPrefix.length);
+    const resultEnd = 8192 - cut.length;
+    const { selected } = fallbackOf([
+      {
+        id: 'a',
+        name: 'T',
+        input: { v: `${argumentBody}😀${'y'.repeat(300)}` },
+        result: { content: `${'x'.repeat(resultEnd - 1)}😀${'y'.repeat(300)}` },
+      },
+    ]);
+    const step = selected.trajectory.steps[1];
+    assert.ok(step?.source === 'agent');
+    const toolArguments = step.tool_calls?.[0]?.arguments as
+      | Record<string, string>
+      | undefined;
+    assert.equal(
+      toolArguments?.forge_truncated_arguments,
+      `${argumentPrefix}${argumentBody}${cut}`,
+    );
+    assert.equal(
+      step.observation?.results[0]?.content,
+      `${'x'.repeat(resultEnd - 1)}${cut}`,
+    );
+  });
+
+  it('truncates a shallow argument object with more than 128 values', () => {
+    const input = Object.fromEntries(
+      Array.from({ length: 130 }, (_, index) => [`k${index}`, index]),
+    );
+    const { selected } = fallbackOf([{ name: 'T', input }]);
+    const step = selected.trajectory.steps[1];
+    assert.ok(step?.source === 'agent');
+    assert.deepEqual(Object.keys(step.tool_calls?.[0]?.arguments ?? {}), [
+      'forge_truncated_arguments',
+    ]);
+  });
+
+  it('marks the assistant message when tool calls are dropped', () => {
+    const calls = Array.from({ length: 300 }, (_, index) => ({
+      name: 'T',
+      input: { index },
+    }));
+    const { selected } = fallbackOf(calls);
+    const step = selected.trajectory.steps[1];
+    assert.ok(step?.source === 'agent');
+    assert.equal(
+      step.message,
+      'Done.\n[Forge omitted additional tool calls and results.]',
     );
   });
 });

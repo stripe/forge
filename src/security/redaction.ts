@@ -5,12 +5,20 @@ export interface RedactionResult<T> {
   readonly replacements: number;
 }
 
-/** Replace exact resolved credential values throughout a JSON-compatible value. */
+/**
+ * Replace exact resolved credential values throughout a JSON-compatible value.
+ * A credential that JSON escaping changes (a quote, backslash, or tab) is also
+ * matched in its escaped spelling, which text produced by serializing JSON
+ * carries.
+ */
 export function redactSecrets<T>(
   value: T,
   secrets: readonly string[],
 ): RedactionResult<T> {
-  const normalizedSecrets = normalizeSecrets(secrets);
+  const normalizedSecrets = normalizeSecrets([
+    ...secrets,
+    ...secrets.map((secret) => JSON.stringify(secret).slice(1, -1)),
+  ]);
   let replacements = 0;
 
   const redactString = (input: string): string => {
@@ -67,6 +75,35 @@ export function redactSecrets<T>(
   };
 
   return { value: visit(value, new Set()) as T, replacements };
+}
+
+/** Redacts exact resolved credentials and counts the replacements it makes. */
+export interface SecretRedactor {
+  text(value: string): string;
+  json<T>(value: T): T;
+  readonly replacements: number;
+}
+
+/** Redact values one at a time, for callers that must redact immediately before a cut. */
+export function createSecretRedactor(
+  secrets: readonly string[],
+): SecretRedactor {
+  let replacements = 0;
+  return {
+    text(value) {
+      const redacted = redactSecrets(value, secrets);
+      replacements += redacted.replacements;
+      return redacted.value;
+    },
+    json(value) {
+      const redacted = redactSecrets(value, secrets);
+      replacements += redacted.replacements;
+      return redacted.value;
+    },
+    get replacements() {
+      return replacements;
+    },
+  };
 }
 
 /** Fail closed when a logical JSON value contains a resolved credential. */
