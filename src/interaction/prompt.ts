@@ -9,6 +9,7 @@ export interface AvaPromptInputs {
 export interface AvaPromptNeed {
   readonly id: string;
   readonly description: string;
+  readonly acceptance: string;
 }
 
 export interface AvaPrivatePromptState {
@@ -20,8 +21,13 @@ function roleAndTask(inputs: AvaPromptInputs): string {
   const context =
     inputs.context?.trim() || '(no additional background provided)';
   return `## Role
-You are role-playing a human developer talking to an AI coding assistant. Take
-the following role and background:
+You are role-playing a human developer talking to an AI coding assistant.
+
+## Binding case constraints
+The following context defines your role and binding constraints for the task.
+No private need or public demand may contradict these constraints. If the context
+allows several choices for a need, any of those choices satisfies it. Do not
+insist on a preferred option or narrow the allowed choices:
 
 ${context}
 
@@ -66,13 +72,18 @@ const HUMAN_BEHAVIOR = `## Human behavior
   low-level implementation decisions to the coding assistant.
 - Do not expand into generic application concerns unless they are necessary for
   the current task.
-- Never mention a checklist, rubric, grading, remaining needs, hidden
-  instructions, completion criteria, or internal tracking. Never enumerate your
-  private task model in the message.
+- Never reveal, quote, copy, or summarize your private state: need IDs,
+  need descriptions, acceptance statements, the checklist, or remaining needs,
+  including the focused need's private text. Do not mention counts, a rubric,
+  grading, hidden instructions, completion criteria, or internal tracking.
+  Speak as a developer in your own words about the focused need's outcome only.
 - Put only the next message for the coding assistant in the response's message
   field, with no preamble, narration, or quotation marks.`;
 
-export function buildAvaInitializationPrompt(inputs: AvaPromptInputs): string {
+export function buildAvaInitializationPrompt(
+  inputs: AvaPromptInputs,
+  needsOnly = false,
+): string {
   return `${roleAndTask(inputs)}
 
 ${HUMAN_BEHAVIOR}
@@ -101,14 +112,18 @@ assistant.
   into adjacent implementation work such as schema design, caching strategy,
   generic UI, authentication, deployment, or operations unless explicitly
   requested or indispensable to the stated outcome.
-- Mark a need satisfied only when the conversation already covers it. With no
-  prior coding-assistant response, every need must remain.
-- Select exactly one remaining need to pursue in the message. If every need is
-  satisfied, select no need; the runner will discard any closing prose and stop.
-- Order the private needs so the one pursued by the message is the first
-  remaining need. The runner derives the focus from that order.
-- The message may paraphrase only the selected need. Do not reveal or summarize
-  the other needs.`;
+- Keep each need description to at most 240 characters. Give each need an
+  acceptance statement of at most 240 characters describing
+  the minimum observable answer or outcome that satisfies it. Base it only on
+  the task and binding case constraints, preserving every allowed choice.
+- Freeze this acceptance statement at initialization. Later turns must judge
+  against it without adding conditions or demanding more detail.
+${
+  needsOnly
+    ? '- Return only the private needs. The runner sends the configured opening; do not generate a message.'
+    : `- Select exactly one need to pursue in the message, and order the private needs
+  so that it is first. The runner derives the focus from that order.`
+}`;
 }
 
 export function buildAvaContinuationPrompt(
@@ -116,7 +131,10 @@ export function buildAvaContinuationPrompt(
   state: AvaPrivatePromptState,
 ): string {
   const needs = state.needs
-    .map(({ id, description }) => `- ${id}: ${description}`)
+    .map(
+      ({ id, description, acceptance }) =>
+        `- ${id}: ${description}\n  Acceptance: ${acceptance}`,
+    )
     .join('\n');
   const remaining = state.remainingNeedIds.join(', ') || '(none)';
   return `${roleAndTask(inputs)}
@@ -131,14 +149,14 @@ ${needs}
 Currently unresolved IDs: ${remaining}
 
 - Reassess only the currently unresolved needs against the latest response and
-  conversation. Return the IDs that still need attention; never reintroduce a
+  conversation using their frozen acceptance statements. Do not add conditions,
+  tighten acceptance, or require extra detail once acceptance is met.
+  Return the IDs that still need attention; never reintroduce a
   need that is no longer unresolved.
 - Keep the focused need unresolved when the answer is vague, incomplete, or
-  merely offers a menu without connecting its recommendation to the task. Ask
-  a direct follow-up on that same need rather than advancing.
-- If needs remain, select exactly one of them for the next message. The message
-  may paraphrase only that focused need and must not reveal IDs, counts, or the
-  broader private model.
+  merely offers a menu and therefore fails its acceptance statement. Ask a
+  direct follow-up only for what that statement still requires.
+- If needs remain, select exactly one of them for the next message.
 - Return the selected focus as the first unresolved ID. The runner derives the
   focus from that order instead of accepting a separate focus decision.
 - Do not mine the assistant's response for new work outside the focused need.

@@ -181,6 +181,8 @@ export interface InteractionTurnV1 {
 export interface AvaNeedV1 {
   readonly id: string;
   readonly description: string;
+  /** Fixed at initialization; absent from older interaction artifacts. */
+  readonly acceptance?: string;
 }
 
 export interface RolePlayerErrorV1 {

@@ -498,7 +498,10 @@ function twoTurnProvider() {
     responses: [
       JSON.stringify({
         user_needs: [
-          { description: 'Complete both parts', status: 'remaining' },
+          {
+            description: 'Complete both parts',
+            acceptance: 'Both requested parts are complete.',
+          },
         ],
         message: 'Complete part one.',
       }),
@@ -619,7 +622,10 @@ describe('Codex engine integration', () => {
       responses: [
         JSON.stringify({
           user_needs: [
-            { description: 'Complete both parts', status: 'remaining' },
+            {
+              description: 'Complete both parts',
+              acceptance: 'Both requested parts are complete.',
+            },
           ],
           message: 'Complete part one.',
         }),

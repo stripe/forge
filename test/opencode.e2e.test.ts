@@ -101,7 +101,10 @@ describe('OpenCode engine integration', () => {
           responses: [
             JSON.stringify({
               user_needs: [
-                { description: 'Complete both parts', status: 'remaining' },
+                {
+                  description: 'Complete both parts',
+                  acceptance: 'Both requested parts are complete.',
+                },
               ],
               message: 'Do part one',
             }),

@@ -1003,18 +1003,53 @@ later require a judge.
 not an adapter or completion-provider feature. The provider supplies only
 structured completions.
 
-Ava privately derives up to six high-level needs, each at most 240 characters,
-from the case task and context. It focuses on one remaining need at a time and
-emits user messages of at most 500 characters. Its private need model is never
-sent to the coding agent. A configured
-initial prompt is sent verbatim before Ava initializes; otherwise Ava generates
-the opening turn.
+Ava privately derives up to six high-level needs from the case task and context.
+Each has a description and an `acceptance` statement, each at most 240 characters.
+The runner freezes both at initialization. Continuation prompts judge against
+that acceptance statement and forbid adding conditions or requiring more detail
+once it is met. Both initialization and continuation prompts present context as
+binding constraints: no need or demand may contradict it,
+and any choice it allows satisfies the relevant need. It focuses on one
+remaining need at a time and emits user messages of at most 500 characters. The
+runner does not forward the private need model as an agent message. A shared
+rule in initialization and continuation prompts forbids revealing, quoting,
+copying, or summarizing private IDs, descriptions, acceptance statements, the
+checklist, or remaining needs. Ava must speak as a developer in its own words
+about the focused outcome. Runtime validation rejects internal need ID tokens
+(`need_` followed by digits as a whole word) and verbatim copies of a
+non-focused need's full description or full acceptance statement that have at
+least four whitespace-separated words and 24 characters. Matching ignores case
+and normalizes whitespace to single spaces before applying both thresholds and
+comparing. Ordinary checklist/grading words and shorter private text are
+prompt-only, as is the focused need's own text, including text another need
+shares with it. A paraphrase or a short private
+value can leak undetected; the shared prompt rule covers these cases.
+Schema, size, and single-message format checks remain. A false disclosure rejection can exhaust
+retries and fail the eval, so the runtime does not compare other private text.
+Ava initializes before the first agent answer unless the configured opening is
+terminal. With a nonterminal configured initial prompt, a needs-only completion
+runs before that opening is sent verbatim; otherwise Ava generates the opening
+and needs together.
+The first agent answer follows the continuation path in both cases.
+A nonterminal configured opening therefore adds one Ava call (with a larger
+output budget) per eval, which includes every bundled multi-turn case; provider
+output floors can make that budget increase a no-op.
+Configured openings containing the stop sentinel skip initialization and keep a
+null private-state audit: the runner sends the opening once and stops after the
+agent's answer.
+
+Runs produced before needs were initialized ahead of the first answer and
+acceptance was fixed have different Ava semantics, so do not pool their scores
+with later runs. Plans record the Forge version, which does not change between
+development builds and carries no separate Ava version. Initialized runs
+record `acceptance` on every need in `interaction.json`; older runs omit it.
 
 [`runConversation`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) alternates Ava decisions
-and sends through one agent session. Ava assesses every completed response,
-including the final allowed turn. The loop stops with:
+and sends through one agent session. Except for terminal configured openings,
+Ava assesses every completed response, including the final allowed turn.
+The loop stops with:
 
-- `task_complete` when no needs remain;
+- `task_complete` when no needs remain or a configured sentinel turn completes;
 - `max_turns` after the final response has been assessed; or
 - `role_player_error` after structured-output/request retry exhaustion.
 
@@ -1025,17 +1060,20 @@ trajectory and records a null agent session identity.
 
 Exhausted decisions record a final `message` alongside the error type, attempt
 count, and summary explanation in `interaction.json` and `result.json`.
+A failure before a configured opening (needs-only initialization) is recorded
+with source `configured_initial_prompt` and an empty message, because the
+authored opening was never sent; other failures record source `generated`.
 Parse messages identify invalid JSON, the first fixed-schema path/category,
-or the specific Ava rule violated (such as a list or leaked private need).
+or the specific Ava format rule violated (such as a list or code fence).
 They never include rejected responses, received values, or unknown keys.
 Request messages retain a bounded, credential-redacted provider error message,
 using the same policy as criterion judging. Standalone Ava callers can provide
 `redactionSecrets` in execution options for custom invokers. These diagnostics
 do not change retries or stop semantics.
 
-`interaction.json` is a post-run audit of public turns plus Ava's need and
-decision history. It is never an execution input and is never supplied to the
-criterion judge.
+`interaction.json` is a post-run audit of public turns plus Ava's needs, their
+acceptance statements, and decision history. Older records may omit `acceptance`.
+It is never an execution input and is never supplied to the criterion judge.
 
 ### Host-side completion providers
 
