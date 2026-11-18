@@ -29,6 +29,8 @@ import type {
 } from '../model/types.ts';
 import type { ForgeBuildIdentity } from '../version.ts';
 
+/** The largest `result.json` the store writes or reads. */
+export const MAX_RESULT_BYTES = 1024 * 1024;
 export const MAX_SETUP_ARTIFACT_BYTES = 2 * 1024 * 1024;
 
 /** Producer release for a companion artifact interpreted by this package. */

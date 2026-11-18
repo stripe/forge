@@ -68,6 +68,7 @@ import {
 import { sizeJudgePrompt } from '../evaluation/judgeEvidenceBudget.ts';
 import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import { resolveJudgeTranscript } from '../evaluation/resolveJudgeTranscript.ts';
+import { samplingResultBudgetIssue } from '../evaluation/samplingResultBudget.ts';
 import {
   createDriverFallbackEvidence,
   parseAgentEvidenceIdentity,
@@ -1139,6 +1140,15 @@ function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
   }
   // Defensive JSON/canonicalization check before any credential or runtime use.
   serializeResolvedRunPlan(plan);
+  const judge = plan.evaluation.judge;
+  if (judge?.candidates !== undefined) {
+    const issue = samplingResultBudgetIssue(
+      plan.evaluation.judging_criteria.length,
+      judge.candidates,
+    );
+    if (issue !== undefined)
+      throw new ForgeExecutionError('invalid_plan', 'preflight', issue);
+  }
 }
 
 function preflightRuntime(

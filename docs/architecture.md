@@ -1622,6 +1622,12 @@ schedule. Exhaustion saves `passed: null`, a `parse_error` with a fixed `reason`
 (for example `unknown_key` or `choice_not_argmax`), and no reply text; the
 criterion is excluded from the score denominator as any judge error is.
 
+Candidates are saved whole in `result.json`, which the store caps at 1 MiB.
+Preflight rejects a plan whose criteria × candidates × the largest saved
+candidate record (two 4,096-character texts plus fixed fields, counted one byte
+per character) exceed that cap less a 64 KiB reserve, before any credential
+lookup or judge request. Candidates are never truncated.
+
 The prompt differs from the pass/fail prompt in three places: it asks the judge
 to "choose met", it states the trajectory capture status in one fixed sentence
 (complete; partial or fallback; native evidence unavailable; or unknown), and it

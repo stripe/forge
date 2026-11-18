@@ -44,12 +44,12 @@ import {
   type ArtifactDescriptorV1,
   type CompletedRun,
   type InteractionArtifactV1,
+  MAX_RESULT_BYTES,
   MAX_SETUP_ARTIFACT_BYTES,
   type RunResult,
 } from './types.ts';
 
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const MAX_RESULT_BYTES = 1024 * 1024;
 const VERIFIED_ARTIFACT_PATHS = new Set([
   'interaction.json',
   'judge-evidence.json',

@@ -65,17 +65,23 @@ const candidates = [
   },
 ];
 
-async function run(judge: JudgeModelRefV1, reply: unknown) {
+async function run(judge: JudgeModelRefV1, reply: unknown, criteria = 1) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-sampling-'));
   roots.push(root);
   const completion = createScriptedCompletionProvider({
     id: model.provider,
-    responses: [JSON.stringify(reply)],
+    responses: Array.from({ length: criteria }, () => JSON.stringify(reply)),
   });
   const agent = createScriptedAgentAdapter();
   const completed = await executeEval({
     runId: 'sampling-judge',
-    plan: createTestResolvedRunPlan({ judgingCriteria: ['Answers.'], judge }),
+    plan: createTestResolvedRunPlan({
+      judgingCriteria: Array.from(
+        { length: criteria },
+        (_, index) => `Answers ${index}.`,
+      ),
+      judge,
+    }),
     composition: {
       runtime: createFakeRuntimeAdapter().adapter,
       agents: new Map([[agent.adapter.id, agent.adapter]]),
@@ -143,6 +149,32 @@ describe('experiment-selected verbalized-sampling judge', () => {
     assert.deepEqual(evaluation.evidence_warnings, warnings);
     assert.ok(
       request.systemPrompt!.includes(renderTrajectoryCaptureStatus(warnings)),
+    );
+  });
+
+  it('saves a published-size sampling result: 18 criteria, 5 long candidates', async () => {
+    const long = candidates.map((candidate) => ({
+      ...candidate,
+      reading: `${candidate.reading} ${'r'.repeat(1000)}`,
+      rationale: `${candidate.rationale} ${'x'.repeat(1000)}`,
+    }));
+    const { completed, verified } = await run(
+      { ...model, mode: 'verbalized-sampling', candidates: 5 },
+      { answers: { criterion: { type: 'choice', candidates: long } } },
+      18,
+    );
+    assert.equal(verified.result.evaluation.judging_criteria.length, 18);
+    assert.deepEqual(verified.result, completed.result);
+  });
+
+  it('rejects before any judge request when the candidates cannot be saved', async () => {
+    await assert.rejects(
+      run(
+        { ...model, mode: 'verbalized-sampling', candidates: 10 },
+        { answers: { criterion: { type: 'choice', candidates } } },
+        18,
+      ),
+      { code: 'invalid_plan', phase: 'preflight' },
     );
   });
 
