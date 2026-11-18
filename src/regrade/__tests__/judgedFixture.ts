@@ -146,7 +146,8 @@ async function samplingExperiment(
     path.join(FIXTURE_ROOT, 'experiment.yaml'),
     'utf8',
   );
-  const judge = '  judge:\n    provider: anthropic\n    model: claude-sonnet-4-6\n';
+  const judge =
+    '  judge:\n    provider: anthropic\n    model: claude-sonnet-4-6\n';
   if (!source.includes(judge)) throw new Error('Fixture judge block changed.');
   const file = path.join(root, 'sampling-experiment.yaml');
   await fs.writeFile(
@@ -156,7 +157,10 @@ async function samplingExperiment(
         judge,
         `${judge}    mode: verbalized-sampling\n    candidates: ${candidates}\n`,
       )
-      .replace('path: ./dataset', `path: ${path.join(FIXTURE_ROOT, 'dataset')}`),
+      .replace(
+        'path: ./dataset',
+        `path: ${path.join(FIXTURE_ROOT, 'dataset')}`,
+      ),
   );
   return file;
 }

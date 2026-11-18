@@ -224,7 +224,10 @@ describe('regradeExperimentRun', () => {
     assert.equal(first.summary.judge_mode, 'verbalized-sampling');
     assert.equal(first.summary.judge_candidates, 5);
     const saved = JSON.parse(
-      await fs.readFile(path.join(sampled, 'runs', 'regrade-source.json'), 'utf8'),
+      await fs.readFile(
+        path.join(sampled, 'runs', 'regrade-source.json'),
+        'utf8',
+      ),
     );
     assert.equal(saved.judge_mode, 'verbalized-sampling');
     assert.equal(saved.judge_candidates, 5);
@@ -236,7 +239,10 @@ describe('regradeExperimentRun', () => {
       const refused = await run(sampled, requested, [ORIGINAL_JUDGMENT]);
       assert.equal(refused.calls, 0);
       assert.equal(refused.summary.failed.length, 1);
-      assert.match(refused.summary.failed[0]!.message, /different judge, method/);
+      assert.match(
+        refused.summary.failed[0]!.message,
+        /different judge, method/,
+      );
     }
 
     // The default judge's output is never reused by a method request.

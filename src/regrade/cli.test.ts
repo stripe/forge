@@ -135,7 +135,12 @@ describe('forge regrade', () => {
             criterion: {
               type: 'choice',
               candidates: [
-                { reading: 'R.', rationale: 'B.', label: 'met', probability: 1 },
+                {
+                  reading: 'R.',
+                  rationale: 'B.',
+                  label: 'met',
+                  probability: 1,
+                },
               ],
             },
           },
@@ -165,9 +170,18 @@ describe('forge regrade', () => {
       '/tmp/x',
     ];
     for (const [extra, message] of [
-      [['--judge-mode', 'explained'], /--judge-mode must be one of: verbalized-sampling/],
-      [['--judge-mode', 'verbalized-sampling', '--judge-candidates', '11'], /--judge-candidates/],
-      [['--judge-mode', 'verbalized-sampling', '--judge-candidates', 'x'], /--judge-candidates/],
+      [
+        ['--judge-mode', 'explained'],
+        /--judge-mode must be one of: verbalized-sampling/,
+      ],
+      [
+        ['--judge-mode', 'verbalized-sampling', '--judge-candidates', '11'],
+        /--judge-candidates/,
+      ],
+      [
+        ['--judge-mode', 'verbalized-sampling', '--judge-candidates', 'x'],
+        /--judge-candidates/,
+      ],
       [['--judge-candidates', '3'], /--judge-candidates requires --judge-mode/],
     ] as const) {
       const result = await invoke([...base, ...extra]);

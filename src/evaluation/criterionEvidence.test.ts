@@ -102,7 +102,10 @@ describe('criterion evidence warnings', () => {
       criterionEvidenceWarnings({
         workspace: { complete: false, warnings: [] },
       }).map(({ source, code }) => `${source}:${code}`),
-      ['trajectory:evidence_completeness_unknown', 'workspace:workspace_incomplete'],
+      [
+        'trajectory:evidence_completeness_unknown',
+        'workspace:workspace_incomplete',
+      ],
     );
   });
 

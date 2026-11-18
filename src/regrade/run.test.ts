@@ -228,7 +228,10 @@ describe('regradeCompletedRun', () => {
     assert.ok(
       request.systemPrompt!.includes(renderTrajectoryCaptureStatus(warnings)),
     );
-    assert.deepEqual(regrade.evaluation.checks, original.result.evaluation.checks);
+    assert.deepEqual(
+      regrade.evaluation.checks,
+      original.result.evaluation.checks,
+    );
   });
 
   it('reproduces the request and evaluation of a run originally judged by sampling', async () => {
@@ -266,7 +269,9 @@ describe('regradeCompletedRun', () => {
     async function saved() {
       const source = await fixture();
       const read = async (name: string) =>
-        JSON.parse(await fs.readFile(path.join(source.runLocation, name), 'utf8'));
+        JSON.parse(
+          await fs.readFile(path.join(source.runLocation, name), 'utf8'),
+        );
       const original = await verifyCompletedRun(source.runLocation);
       return {
         plan: parseResolvedRunPlan(await read('plan.json')),
@@ -303,7 +308,8 @@ describe('regradeCompletedRun', () => {
 
     it('marks unrecorded trajectory completeness as unknown, not partial', async () => {
       const { evidence: _evidence, ...withoutEvidence } = await saved();
-      const warnings = judgeInputFromSavedRun(withoutEvidence).evidenceWarnings!;
+      const warnings =
+        judgeInputFromSavedRun(withoutEvidence).evidenceWarnings!;
       assert.deepEqual(
         warnings.filter(({ source }) => source === 'trajectory'),
         [...UNKNOWN_EVIDENCE_WARNINGS],

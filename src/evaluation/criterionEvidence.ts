@@ -58,15 +58,15 @@ export function criterionEvidenceWarnings(input: {
     ...(input.trajectory === undefined
       ? UNKNOWN_EVIDENCE_WARNINGS
       : input.trajectory.completeness === 'complete'
-      ? []
-      : [
-          {
-            source: 'trajectory' as const,
-            code: 'trajectory_incomplete',
-            message:
-              'The selected trajectory is partial or uses driver fallback.',
-          },
-        ]),
+        ? []
+        : [
+            {
+              source: 'trajectory' as const,
+              code: 'trajectory_incomplete',
+              message:
+                'The selected trajectory is partial or uses driver fallback.',
+            },
+          ]),
     ...(input.trajectory?.warnings ?? []).map((warning) => ({
       ...warning,
       source: 'trajectory' as const,
