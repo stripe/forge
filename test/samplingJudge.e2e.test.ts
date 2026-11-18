@@ -178,6 +178,53 @@ describe('experiment-selected verbalized-sampling judge', () => {
     );
   });
 
+  it('rejects a sampling run whose result drops or alters its audit records', async () => {
+    const judge: JudgeModelRefV1 = {
+      ...model,
+      mode: 'verbalized-sampling',
+      candidates: 5,
+    };
+    const { completed } = await run(judge, {
+      answers: { criterion: { type: 'choice', candidates } },
+    });
+    const file = path.join(completed.location, 'result.json');
+    const original = await fs.readFile(file, 'utf8');
+    type Saved = {
+      evaluation: {
+        judging_criteria: Record<string, unknown>[];
+        evidence_warnings?: unknown;
+      };
+    };
+    const tamper = async (edit: (result: Saved) => void) => {
+      const result = JSON.parse(original) as Saved;
+      edit(result);
+      await fs.writeFile(file, JSON.stringify(result));
+      try {
+        await verifyCompletedRun(completed.location);
+      } finally {
+        await fs.writeFile(file, original);
+      }
+    };
+    await verifyCompletedRun(completed.location);
+    const edits: ((result: Saved) => void)[] = [
+      (r) => {
+        delete r.evaluation.judging_criteria[0]!.decision;
+      },
+      (r) => {
+        delete r.evaluation.judging_criteria[0]!.evidence_warnings_ref;
+        delete r.evaluation.evidence_warnings;
+      },
+      (r) => {
+        delete r.evaluation.judging_criteria[0]!.evidence_warnings_ref;
+      },
+      (r) => {
+        r.evaluation.evidence_warnings = [];
+      },
+    ];
+    for (const edit of edits)
+      await assert.rejects(tamper(edit));
+  });
+
   it('keeps the default judge and its saved shape when no method is selected', async () => {
     const { completion, verified } = await run(model, criterionBoolean());
     const request = completion.calls[0]!.request;

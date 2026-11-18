@@ -680,6 +680,24 @@ function verifyJudgeEvidence(
     trajectory: result.evidence,
     workspace: judgeEvidence.workspace,
   });
+  if (plan.evaluation.judge?.mode !== undefined) {
+    // A method judge records its decisions and the capture status it saw.
+    for (const criterion of result.evaluation.judging_criteria) {
+      if (
+        criterion.evidence_warnings_ref !== 'evaluation' ||
+        (criterion.passed !== null && criterion.decision === undefined)
+      ) {
+        throw new ArtifactStoreError(
+          'Sampling-judged criteria must keep their decision and evidence warning reference.',
+        );
+      }
+    }
+    if (result.evaluation.evidence_warnings === undefined) {
+      throw new ArtifactStoreError(
+        'Sampling-judged results must keep their evidence warnings.',
+      );
+    }
+  }
   if (
     result.evaluation.evidence_warnings !== undefined &&
     serializeCanonicalJson(result.evaluation.evidence_warnings) !==
