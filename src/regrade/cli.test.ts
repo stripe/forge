@@ -107,4 +107,87 @@ describe('forge regrade', () => {
     assert.equal(extra.code, 2);
     assert.equal(extra.judge.calls.length, 0);
   });
+
+  it('selects the judge method for a regrade and saves it', async () => {
+    const root = await temporaryRoot('forge-regrade-cli-method-');
+    roots.push(root);
+    const source = await runJudgedFixture(root);
+    const output = path.join(root, 'regraded');
+    const result = await invoke(
+      [
+        'regrade',
+        '--experiment-run',
+        source.experimentLocation,
+        '--judge-provider',
+        'anthropic',
+        '--judge-model',
+        'claude-opus-4-6',
+        '--judge-mode',
+        'verbalized-sampling',
+        '--judge-candidates',
+        '3',
+        '--output',
+        output,
+      ],
+      [
+        JSON.stringify({
+          answers: {
+            criterion: {
+              type: 'choice',
+              candidates: [
+                {
+                  reading: 'R.',
+                  rationale: 'B.',
+                  label: 'met',
+                  probability: 1,
+                },
+              ],
+            },
+          },
+        }),
+      ],
+    );
+    assert.equal(result.code, 0, result.stderr);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.judge_mode, 'verbalized-sampling');
+    assert.equal(summary.judge_candidates, 3);
+    assert.match(
+      result.judge.calls[0]!.request.systemPrompt!,
+      /Generate 3 candidate answers/,
+    );
+  });
+
+  it('rejects an unknown judge mode, a bad count, and a count without a mode', async () => {
+    const base = [
+      'regrade',
+      '--experiment-run',
+      '/nonexistent',
+      '--judge-provider',
+      'anthropic',
+      '--judge-model',
+      'm',
+      '--output',
+      '/tmp/x',
+    ];
+    for (const [extra, message] of [
+      [
+        ['--judge-mode', 'explained'],
+        /--judge-mode must be one of: verbalized-sampling/,
+      ],
+      [
+        ['--judge-mode', 'verbalized-sampling', '--judge-candidates', '11'],
+        /--judge-candidates/,
+      ],
+      [
+        ['--judge-mode', 'verbalized-sampling', '--judge-candidates', 'x'],
+        /--judge-candidates/,
+      ],
+      [['--judge-candidates', '3'], /--judge-candidates requires --judge-mode/],
+    ] as const) {
+      const result = await invoke([...base, ...extra]);
+      assert.equal(result.code, 2);
+      assert.match(result.stderr, message);
+      assert.equal(result.judge.calls.length, 0);
+    }
+  });
 });

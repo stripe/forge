@@ -38,6 +38,10 @@ import {
   type RunSelection,
 } from './model/index.ts';
 import {
+  DECISION_JUDGE_MODES,
+  decisionJudgeMethod,
+} from './model/judgeMethod.ts';
+import {
   expandExperiment,
   ManifestCaseFileError,
   resolveManifestCaseIdFromFile,
@@ -96,6 +100,8 @@ const HOST_CLI_OPTIONS = {
   'experiment-run': { type: 'string' },
   'judge-provider': { type: 'string' },
   'judge-model': { type: 'string' },
+  'judge-mode': { type: 'string' },
+  'judge-candidates': { type: 'string' },
   host: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean' },
@@ -120,7 +126,7 @@ const USAGE = `Usage:
   forge plan --experiment <file> [selection options]
   forge run --experiment <file> [selection options] [run options]
   forge run --experiment <file> --resume <experiment-run-id> [run options]
-  forge regrade --experiment-run <directory> --judge-provider <id> --judge-model <id> --output <directory> [--jobs <count>]
+  forge regrade --experiment-run <directory> --judge-provider <id> --judge-model <id> --output <directory> [--judge-mode <mode> [--judge-candidates <k>]] [--jobs <count>]
 
 Selection options:
   --case <id>          Select an eval case
@@ -149,6 +155,8 @@ Regrade options:
   --experiment-run <directory>  Saved experiment run (results/experiments/<id>), read only
   --judge-provider <id>         Completion provider for the new judge, such as anthropic
   --judge-model <id>            Judge model
+  --judge-mode <mode>           verbalized-sampling; omit for the default pass/fail judge
+  --judge-candidates <k>        Candidate answers for verbalized-sampling (2-10, default 5)
   --output <directory>          New directory for regrades and report.json, outside the source
   --jobs <count>                Maximum simultaneous run regrades (default: 1)
   --credential-env <reference>=<environment-name>
@@ -304,6 +312,8 @@ export async function runCli(
         'experiment-run',
         'judge-provider',
         'judge-model',
+        'judge-mode',
+        'judge-candidates',
         'output',
         'jobs',
         'credential-env',
@@ -1060,6 +1070,10 @@ async function runRegradeCommand(
     provider: required('judge-provider'),
     model: required('judge-model'),
   };
+  const judgeMethod = parseJudgeMethodOptions(
+    values['judge-mode'],
+    values['judge-candidates'],
+  );
   const jobsValue = values.jobs;
   const jobs = jobsValue === undefined ? 1 : Number(jobsValue);
   if (!Number.isSafeInteger(jobs) || jobs < 1)
@@ -1089,6 +1103,7 @@ async function runRegradeCommand(
     {
       experimentRun,
       judge,
+      ...(judgeMethod === undefined ? {} : { judgeMethod }),
       output,
       jobs,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -1102,6 +1117,31 @@ async function runRegradeCommand(
   );
   stdout(`${JSON.stringify(summary)}\n`);
   return summary.failed.length === 0 ? 0 : 1;
+}
+
+/** The judge method selected by regrade flags; `undefined` keeps the default judge. */
+function parseJudgeMethodOptions(
+  mode: unknown,
+  candidates: unknown,
+): ReturnType<typeof decisionJudgeMethod> | undefined {
+  if (mode === undefined) {
+    if (candidates !== undefined)
+      throw new CliUsageError('--judge-candidates requires --judge-mode.');
+    return undefined;
+  }
+  try {
+    return decisionJudgeMethod(
+      mode,
+      candidates === undefined ? undefined : Number(candidates),
+    );
+  } catch (error) {
+    throw new CliUsageError(
+      error instanceof TypeError &&
+        error.message.startsWith('Judge mode must be')
+        ? `--judge-mode must be one of: ${DECISION_JUDGE_MODES.join(', ')}.`
+        : `--judge-candidates: ${(error as Error).message}`,
+    );
+  }
 }
 
 class CliUsageError extends Error {

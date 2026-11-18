@@ -692,6 +692,13 @@ npx --no-install forge regrade \
   --output ./regrades/opus-4-6 --jobs 4
 ```
 
+Add `--judge-mode verbalized-sampling` (and `--judge-candidates <k>`, 2–10,
+default 5) to regrade with the [sampling judge](#requirements--credentials)
+instead of the default pass/fail judge. The regrade records `judge_mode` and
+`judge_candidates`, and its prompt states the trajectory capture status recorded
+with the source run. A run whose judge saw no transcript because of the prompt
+budget is regraded on code evidence only, as it was originally judged.
+
 The source experiment run is only read; `--output` must be a new location
 outside it. Each regrade is written to `runs/<run-id>.json` there, with the
 judge, the new evaluation, its completion calls, and digests of the saved
@@ -704,9 +711,9 @@ source experiment run. For runs with judging criteria, regrade reports count
 rate-limit waits from the new judge calls only; they do not add waits from the
 source run. Runs that were not judged, and reused older regrades without wait
 records, leave that value absent. Rerunning the same command reuses regrades
-for the same judge and committed result, so an interrupted regrade can be
-continued. An output that already holds regrades from another judge reports
-those runs as failed instead of mixing judges. Only one regrade can write to an
+for the same judge, method, and committed result, so an interrupted regrade can
+be continued. An output that already holds regrades from another judge or method
+reports those runs as failed instead of mixing them. Only one regrade can write to an
 output at a time: a second concurrent invocation fails, naming the output,
 instead of interleaving its results.
 
