@@ -421,8 +421,7 @@ export const ModelProfileSchema = z
   })
   .strict();
 
-/** A judge reference; `candidates` only accompanies verbalized sampling. */
-const JudgeModelRefSchema = ModelRefSchema.extend({
+const JudgeModelRefFields = ModelRefSchema.extend({
   mode: z
     .enum(DECISION_JUDGE_MODES as [DecisionJudgeMode, ...DecisionJudgeMode[]])
     .optional(),
@@ -432,16 +431,26 @@ const JudgeModelRefSchema = ModelRefSchema.extend({
     .min(MIN_VERBALIZED_SAMPLING_CANDIDATES)
     .max(MAX_VERBALIZED_SAMPLING_CANDIDATES)
     .optional(),
-})
-  .strict()
-  .refine(
-    (judge) =>
-      judge.candidates === undefined || judge.mode === 'verbalized-sampling',
-    {
-      message: 'Judge candidates apply only to verbalized-sampling.',
-      path: ['candidates'],
-    },
-  );
+}).strict();
+
+/** An authored judge reference; `candidates` only accompanies a mode. */
+const JudgeModelRefSchema = JudgeModelRefFields.refine(
+  (judge) =>
+    judge.candidates === undefined || judge.mode === 'verbalized-sampling',
+  {
+    message: 'Judge candidates apply only to verbalized-sampling.',
+    path: ['candidates'],
+  },
+);
+
+/** A resolved judge reference: a mode comes with its materialized count. */
+const ResolvedJudgeModelRefSchema = JudgeModelRefSchema.refine(
+  (judge) => judge.mode === undefined || judge.candidates !== undefined,
+  {
+    message: 'A resolved judge mode requires its candidates.',
+    path: ['candidates'],
+  },
+);
 
 const AgentSelectionSchema = ModelRefSchema.extend({
   adapter: SimpleIdentifierSchema,
@@ -841,7 +850,7 @@ const ResolvedRunPlanSchema = z
         judging_criteria: JudgingCriteriaSchema,
         checks: ChecksSchema.optional(),
         example_answer: z.string().refine(isBoundedText).optional(),
-        judge: JudgeModelRefSchema.optional(),
+        judge: ResolvedJudgeModelRefSchema.optional(),
       })
       .strict(),
     role_player: ModelRefSchema.optional(),
