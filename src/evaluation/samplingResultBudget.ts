@@ -13,9 +13,12 @@ export const SAMPLING_RESULT_RESERVE_BYTES = 64 * 1024;
 
 /**
  * Why a sampling judge cannot be saved for this many criteria and candidates,
- * or `undefined` when its largest result fits `result.json`. Candidates are
- * saved whole, so the check runs before any paid work. Sizes count each
- * character as one byte, which is exact for ASCII replies.
+ * or `undefined` when the estimate fits `result.json`. Candidates are saved
+ * whole, so the check runs before any paid work. The estimate counts each
+ * character as one byte and leaves a fixed reserve for everything else, so it
+ * rejects configurations that cannot fit; it is not an upper bound. Multi-byte
+ * text, JSON escaping and per-criterion explanations can still push a result
+ * over the store limit, which then fails the run as before.
  */
 export function samplingResultBudgetIssue(
   criteria: number,

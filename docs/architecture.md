@@ -1626,7 +1626,11 @@ Candidates are saved whole in `result.json`, which the store caps at 1 MiB.
 Preflight rejects a plan whose criteria × candidates × the largest saved
 candidate record (two 4,096-character texts plus fixed fields, counted one byte
 per character) exceed that cap less a 64 KiB reserve, before any credential
-lookup or judge request. Candidates are never truncated.
+lookup or judge request. The estimate rejects configurations that cannot fit;
+it is not an upper bound. Multi-byte text, JSON escaping and per-criterion
+explanations can still make a result exceed the cap, which fails the run at
+commit, the same limit and behavior as the implementation the published results
+used. Candidates are never truncated.
 
 The prompt differs from the pass/fail prompt in three places: it asks the judge
 to "choose met", it states the trajectory capture status in one fixed sentence
