@@ -77,10 +77,23 @@ function createCredentialExecution(engine: ForgeEngine = defaultForgeEngine) {
         results: [{ index: 0, passed: true, explanation: 'Task completed.' }],
       });
     }
+    if (request.responseSchema?.name === 'ava_initial_needs') {
+      return JSON.stringify({
+        user_needs: [
+          {
+            description: 'Complete the task',
+            acceptance: 'The task is complete.',
+          },
+        ],
+      });
+    }
     return request.responseSchema?.name === 'ava_initial_turn'
       ? JSON.stringify({
           user_needs: [
-            { description: 'Complete the task', status: 'remaining' },
+            {
+              description: 'Complete the task',
+              acceptance: 'The task is complete.',
+            },
           ],
           message: 'Complete the task.',
         })

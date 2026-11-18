@@ -10,10 +10,21 @@ describe('Ava prompts', () => {
   for (const [phase, buildPrompt] of [
     ['initialization', buildAvaInitializationPrompt],
     [
+      'needs-only initialization',
+      (inputs: Parameters<typeof buildAvaInitializationPrompt>[0]) =>
+        buildAvaInitializationPrompt(inputs, true),
+    ],
+    [
       'continuation',
       (inputs: Parameters<typeof buildAvaInitializationPrompt>[0]) =>
         buildAvaContinuationPrompt(inputs, {
-          needs: [{ id: 'need_1', description: 'Complete the requested task' }],
+          needs: [
+            {
+              id: 'need_1',
+              description: 'Complete the requested task',
+              acceptance: 'The requested work is complete.',
+            },
+          ],
           remainingNeedIds: ['need_1'],
         }),
     ],
@@ -42,6 +53,48 @@ describe('Ava prompts', () => {
       );
     });
 
+    it(`makes case constraints binding during ${phase}`, () => {
+      const context =
+        'Use either hosted or embedded checkout. No account login is required.';
+      const prompt = buildPrompt({ task: 'Add checkout.', context });
+      const constraints = prompt
+        .split('## Binding case constraints\n')[1]
+        ?.split('\n## Task')[0];
+      assert.ok(constraints);
+      assert.ok(constraints.includes(context));
+      assert.match(
+        constraints,
+        /No private need or public demand may contradict these constraints/,
+      );
+      assert.match(
+        constraints,
+        /allows several choices for a need, any of those choices satisfies it/,
+      );
+      assert.match(
+        constraints,
+        /Do not\ninsist on a preferred option or narrow the allowed choices/,
+      );
+    });
+
+    it(`instructs Ava not to disclose private state during ${phase}`, () => {
+      const prompt = buildPrompt({ task: 'Explain checkout.' });
+      const rule = prompt
+        .split(
+          '- Never reveal, quote, copy, or summarize your private state:',
+        )[1]
+        ?.split('\n- ')[0];
+      assert.ok(rule);
+      assert.match(
+        rule,
+        /need IDs,\n {2}need descriptions, acceptance statements, the checklist, or remaining needs/,
+      );
+      assert.match(rule, /including the focused need's private text/);
+      assert.match(
+        rule,
+        /Speak as a developer in your own words about the focused need's outcome only/,
+      );
+    });
+
     it(`keeps ${phase} recommendation requests advice-only`, () => {
       const prompt = buildPrompt({
         task: 'Recommend a payment provider for a new store.',
@@ -53,6 +106,24 @@ describe('Ava prompts', () => {
       );
     });
   }
+
+  it('sets fixed acceptance from the task and constraints in both initialization formats', () => {
+    for (const needsOnly of [false, true]) {
+      const prompt = buildAvaInitializationPrompt(
+        { task: 'Add checkout.' },
+        needsOnly,
+      );
+      assert.match(prompt, /acceptance statement of at most 240 characters/);
+      assert.match(
+        prompt,
+        /Base it only on\n {2}the task and binding case constraints, preserving every allowed choice/,
+      );
+      assert.match(
+        prompt,
+        /Freeze this acceptance statement at initialization/,
+      );
+    }
+  });
 
   it('binds the trimmed task and context, with a fallback for blank background', () => {
     const inputs = Object.freeze({
@@ -88,8 +159,13 @@ describe('Ava prompts', () => {
         Object.freeze({
           id: 'need_1',
           description: 'Choose the checkout experience',
+          acceptance: 'Either hosted or embedded checkout is chosen.',
         }),
-        Object.freeze({ id: 'need_2', description: 'Verify the receipt link' }),
+        Object.freeze({
+          id: 'need_2',
+          description: 'Verify the receipt link',
+          acceptance: 'A receipt link verification result is reported.',
+        }),
       ]),
       remainingNeedIds: Object.freeze(['need_2']),
     });
@@ -105,7 +181,7 @@ describe('Ava prompts', () => {
     );
     assert.ok(
       prompt.includes(
-        '\n\n- need_1: Choose the checkout experience\n- need_2: Verify the receipt link\n\nCurrently unresolved IDs: need_2\n',
+        '\n\n- need_1: Choose the checkout experience\n  Acceptance: Either hosted or embedded checkout is chosen.\n- need_2: Verify the receipt link\n  Acceptance: A receipt link verification result is reported.\n\nCurrently unresolved IDs: need_2\n',
       ),
     );
     assert.match(

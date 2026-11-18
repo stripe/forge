@@ -49,7 +49,10 @@ describe('multi-turn CLI end to end', () => {
         const answers: Record<string, unknown> = {
           ava_initial_turn: {
             user_needs: [
-              { description: 'Complete the task', status: 'remaining' },
+              {
+                description: 'Complete the task',
+                acceptance: 'The task is reported as done.',
+              },
             ],
             message: 'Please complete the task.',
           },
@@ -190,6 +193,12 @@ describe('multi-turn CLI end to end', () => {
               'absent',
             );
             if (turn++ === 0) {
+              assert.equal(completion.calls.length, 1);
+              assert.ok(
+                completion.calls[0]!.request.messages.every(
+                  ({ role }) => role === 'user',
+                ),
+              );
               assert.equal(message, context.plan.case.initial_prompt);
             } else {
               assert.ok(message.includes(deliverable.trim()));
@@ -218,9 +227,12 @@ describe('multi-turn CLI end to end', () => {
           user_needs: [
             {
               description: 'Create the requested release summary',
-              status: 'remaining',
+              acceptance: 'The file contains the supplied status sentence.',
             },
           ],
+        }),
+        JSON.stringify({
+          remaining_need_ids: ['need_1'],
           message: `Use this exact status sentence: ${deliverable.trim()}`,
         }),
         JSON.stringify({ remaining_need_ids: [], message: '' }),
@@ -327,6 +339,18 @@ describe('multi-turn CLI end to end', () => {
       { forgeVersion: summary.result.forge.version },
     );
     assert.equal(interaction.turns.length, 2);
+    assert.deepEqual(interaction.role_player?.needs, [
+      {
+        id: 'need_1',
+        description: 'Create the requested release summary',
+        acceptance: 'The file contains the supplied status sentence.',
+      },
+    ]);
+    assert.equal(interaction.role_player?.decisions[0]?.after_agent_turn, null);
+    assert.deepEqual(
+      interaction.role_player?.decisions[0]?.remaining_need_ids,
+      ['need_1'],
+    );
     assert.equal(agent.messages.length, 2);
     const judge = parseJudgeEvidence(
       JSON.parse(
@@ -365,7 +389,7 @@ describe('multi-turn CLI end to end', () => {
       JSON.stringify(judgeCall),
       /private database bytes|private archive bytes|\\u0000/,
     );
-    assert.equal(completion.calls.length, 3);
+    assert.equal(completion.calls.length, 4);
     for (const { request } of completion.calls) {
       assert.equal(Object.hasOwn(request, 'temperature'), false);
     }

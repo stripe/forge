@@ -641,6 +641,21 @@ derived snapshots and can be stale after interruption.
 See the [evidence and artifact architecture](docs/architecture.md#evidence-architecture)
 for verification, judge-visible projections, and fidelity limits.
 
+To find saved runs with no workspace text and an entry-limit warning, use
+optional `jq`:
+
+```sh
+find results/experiments -name judge-evidence.json -exec jq -r \
+  'select((.workspace.entries | length) == 0 and any(.workspace.warnings[]?; .code == "workspace_entry_limit_reached")) | input_filename' {} +
+```
+
+This query omits runs that hit the limit but kept some files. Drop the
+`(.workspace.entries | length) == 0 and` condition to find all entry-limit runs.
+Inspect their warnings before rerunning: shallow directories or other bounds
+can still leave no eligible text. Capturing missing text requires a new
+execution. Resume keeps completed scores, and regrade reuses saved evidence;
+neither can recover text that was not captured.
+
 When using Forge as a library, you can
 [supply your own Dockerfile](docs/architecture.md#custom-docker-images) while
 reusing its container lifecycle. The CLI uses the packaged image.
@@ -676,7 +691,9 @@ for the same judge and committed result, so an interrupted regrade can be
 continued. An output that already holds regrades from another judge reports
 those runs as failed instead of mixing judges. Only one regrade can write to an
 output at a time: a second concurrent invocation fails, naming the output,
-instead of interleaving its results.
+instead of interleaving its results. A fatal worker failure stops new scheduling and
+requests cancellation of in-flight judging. The invocation waits for every
+worker to settle before releasing the output lock and reporting that failure.
 
 Deterministic file checks are not re-run, because the workspace is gone
 after a run; each regrade keeps the run's original check results. The judge

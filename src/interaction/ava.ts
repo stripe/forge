@@ -21,12 +21,16 @@ import {
 export const MAX_AVA_ATTEMPTS = 3;
 export const MAX_AVA_NEEDS = 6;
 export const MAX_AVA_NEED_DESCRIPTION_CHARACTERS = 240;
+export const MAX_AVA_NEED_ACCEPTANCE_CHARACTERS = 240;
 export const MAX_AVA_MESSAGE_CHARACTERS = 500;
+
+const MIN_AVA_PRIVATE_MATCH_WORDS = 4;
+const MIN_AVA_PRIVATE_MATCH_CHARACTERS = 24;
 
 const NEVER_ABORTED_SIGNAL = new AbortController().signal;
 
 export interface AvaRolePlayerOptions extends AvaPromptInputs {
-  /** Configured opening sent verbatim before Ava initializes private state. */
+  /** Configured opening sent verbatim; terminal openings skip initialization. */
   readonly initialPrompt?: string;
   readonly signal?: AbortSignal;
 }
@@ -39,6 +43,7 @@ export interface AvaRolePlayerExecutionOptions extends CompletionRetryOptions {
 export interface AvaNeed {
   readonly id: string;
   readonly description: string;
+  readonly acceptance: string;
 }
 
 export interface AvaError {
@@ -53,7 +58,7 @@ export interface AvaError {
 export interface AvaTurn {
   readonly message: string;
   readonly stop: boolean;
-  /** Null only while a configured opening has not initialized Ava. */
+  /** Null when initialization failed or a terminal opening skipped it. */
   readonly remainingNeeds: readonly AvaNeed[] | null;
   /** Ava's complete private task model; never forward it to the agent. */
   readonly needs: readonly AvaNeed[] | null;
@@ -71,52 +76,74 @@ const InitialNeedResponse = z
       .trim()
       .min(1)
       .max(MAX_AVA_NEED_DESCRIPTION_CHARACTERS),
-    status: z.enum(['remaining', 'satisfied']),
+    acceptance: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_AVA_NEED_ACCEPTANCE_CHARACTERS),
   })
   .strict();
 
-const InitialAvaResponse = z
+const InitialAvaNeeds = z
   .object({
     user_needs: z.array(InitialNeedResponse).min(1).max(MAX_AVA_NEEDS),
-    message: z.string().max(MAX_AVA_MESSAGE_CHARACTERS),
   })
   .strict();
 
-const INITIAL_AVA_RESPONSE_SCHEMA: StrictCompletionResponseSchema = {
-  name: 'ava_initial_turn',
-  description: "Ava's compact private task model and first generated message.",
-  strict: true,
-  schema: {
-    type: 'object',
-    properties: {
-      user_needs: {
-        type: 'array',
-        minItems: 1,
-        maxItems: MAX_AVA_NEEDS,
-        items: {
-          type: 'object',
-          properties: {
-            description: {
-              type: 'string',
-              minLength: 1,
-              maxLength: MAX_AVA_NEED_DESCRIPTION_CHARACTERS,
-              pattern: '\\S',
+const InitialAvaResponse = InitialAvaNeeds.extend({
+  message: z.string().max(MAX_AVA_MESSAGE_CHARACTERS),
+});
+
+function initializationResponseFormat(
+  needsOnly: boolean,
+): StrictCompletionResponseSchema {
+  return {
+    name: needsOnly ? 'ava_initial_needs' : 'ava_initial_turn',
+    description: needsOnly
+      ? "Ava's compact private task model before the configured opening."
+      : "Ava's compact private task model and first generated message.",
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        user_needs: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_AVA_NEEDS,
+          items: {
+            type: 'object',
+            properties: {
+              description: {
+                type: 'string',
+                minLength: 1,
+                maxLength: MAX_AVA_NEED_DESCRIPTION_CHARACTERS,
+                pattern: '\\S',
+              },
+              acceptance: {
+                type: 'string',
+                minLength: 1,
+                maxLength: MAX_AVA_NEED_ACCEPTANCE_CHARACTERS,
+                pattern: '\\S',
+              },
             },
-            status: {
-              type: 'string',
-              enum: ['remaining', 'satisfied'],
-            },
+            required: ['description', 'acceptance'],
+            additionalProperties: false,
           },
-          required: ['description', 'status'],
-          additionalProperties: false,
         },
+        ...(needsOnly
+          ? {}
+          : {
+              message: {
+                type: 'string',
+                maxLength: MAX_AVA_MESSAGE_CHARACTERS,
+              },
+            }),
       },
-      message: { type: 'string', maxLength: MAX_AVA_MESSAGE_CHARACTERS },
+      required: needsOnly ? ['user_needs'] : ['user_needs', 'message'],
+      additionalProperties: false,
     },
-    required: ['user_needs', 'message'],
-    additionalProperties: false,
-  },
-};
+  };
+}
 
 interface ContinuationAvaResponse {
   readonly remainingNeedIds: readonly string[];
@@ -194,7 +221,11 @@ function stripLeadingAcknowledgment(message: string): string {
     .trim();
 }
 
-function assertSafeGeneratedMessage(
+function normalizeAvaText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function validateGeneratedMessage(
   message: string,
   focusedNeedId: string,
   needs: readonly AvaNeed[],
@@ -212,21 +243,29 @@ function assertSafeGeneratedMessage(
       'Ava returned a list instead of one human-like message.',
     );
   }
-  if (
-    /\b(?:checklist|rubric|grading|remaining needs?|completion criteria|need_\d+)\b/i.test(
-      trimmed,
-    )
-  ) {
-    throw new AvaResponseError('Ava exposed private task-model terminology.');
+  if (/\bneed_\d+\b/i.test(trimmed)) {
+    throw new AvaResponseError('Ava exposed an internal need ID.');
   }
-  const lowerMessage = trimmed.toLowerCase();
+  const normalizedMessage = normalizeAvaText(trimmed);
+  const focusedNeed = needs.find((need) => need.id === focusedNeedId);
+  // Text a non-focused need shares with the focused need is not a leak.
+  const focusedTexts = new Set(
+    [focusedNeed?.description, focusedNeed?.acceptance].map((text) =>
+      normalizeAvaText(text ?? ''),
+    ),
+  );
   for (const need of needs) {
-    if (
-      need.id !== focusedNeedId &&
-      need.description.length >= 20 &&
-      lowerMessage.includes(need.description.toLowerCase())
-    ) {
-      throw new AvaResponseError('Ava exposed a non-focused private need.');
+    if (need.id === focusedNeedId) continue;
+    for (const text of [need.description, need.acceptance]) {
+      const privateText = normalizeAvaText(text);
+      if (focusedTexts.has(privateText)) continue;
+      if (
+        privateText.length >= MIN_AVA_PRIVATE_MATCH_CHARACTERS &&
+        privateText.split(' ').length >= MIN_AVA_PRIVATE_MATCH_WORDS &&
+        normalizedMessage.includes(privateText)
+      ) {
+        throw new AvaResponseError('Ava exposed a non-focused private need.');
+      }
     }
   }
   return trimmed;
@@ -263,18 +302,18 @@ export class AvaRolePlayer {
     const firstTurn =
       this.#history.length === 0 && lastAgentResponse === undefined;
 
-    if (firstTurn && this.#initialPrompt !== undefined) {
-      const stop = this.#initialPrompt.includes(AVA_STOP_SENTINEL);
-      const message = this.#initialPrompt
-        .split(AVA_STOP_SENTINEL)
+    const configuredOpening = firstTurn && this.#initialPrompt !== undefined;
+    if (configuredOpening && this.#initialPrompt!.includes(AVA_STOP_SENTINEL)) {
+      throwIfAborted(this.#signal);
+      const message = this.#initialPrompt!.split(AVA_STOP_SENTINEL)
         .join('')
         .trim();
       this.#history.push({ role: 'assistant', content: message });
       return {
         message,
-        stop,
-        remainingNeeds: null,
+        stop: true,
         needs: null,
+        remainingNeeds: null,
         focusNeedId: null,
         source: 'configured_initial_prompt',
       };
@@ -292,7 +331,7 @@ export class AvaRolePlayer {
     const initializing = this.#needs === undefined;
     const remainingNeedIds = this.#remainingNeedIds ?? [];
     const systemPrompt = initializing
-      ? buildAvaInitializationPrompt(this.#promptInputs)
+      ? buildAvaInitializationPrompt(this.#promptInputs, configuredOpening)
       : buildAvaContinuationPrompt(this.#promptInputs, {
           needs: this.#needs!,
           remainingNeedIds,
@@ -301,17 +340,18 @@ export class AvaRolePlayer {
     if (lastAgentResponse === undefined) {
       messages.push({
         role: 'user',
-        content:
-          'Start the conversation with one natural message about one high-level need.',
+        content: configuredOpening
+          ? 'Derive the private needs before the configured opening is sent. Return only the private task model.'
+          : 'Start the conversation with one natural message about one high-level need.',
       });
     }
 
     const request = {
       systemPrompt,
       messages,
-      maxTokens: initializing ? 700 : 400,
+      maxTokens: initializing ? 1400 : 400,
       responseSchema: initializing
-        ? INITIAL_AVA_RESPONSE_SCHEMA
+        ? initializationResponseFormat(configuredOpening)
         : continuationResponseFormat(remainingNeedIds),
       signal: this.#signal,
     } as const;
@@ -349,7 +389,7 @@ export class AvaRolePlayer {
         }
         try {
           const turn = initializing
-            ? this.#initializeFromResponse(raw, lastAgentResponse === undefined)
+            ? this.#initializeFromResponse(raw, configuredOpening)
             : this.#continueFromResponse(raw);
           if (turn.message) {
             this.#history.push({ role: 'assistant', content: turn.message });
@@ -367,28 +407,42 @@ export class AvaRolePlayer {
       },
     );
     if (outcome.ok) return outcome.value;
-    return this.#errorTurn(finalError!);
+    return this.#errorTurn(
+      finalError!,
+      configuredOpening ? 'configured_initial_prompt' : 'generated',
+    );
   }
 
-  #initializeFromResponse(raw: string, opening: boolean): AvaTurn {
-    const parsed = InitialAvaResponse.parse(JSON.parse(raw));
+  #initializeFromResponse(raw: string, configuredOpening: boolean): AvaTurn {
+    const parsed = configuredOpening
+      ? { ...InitialAvaNeeds.parse(JSON.parse(raw)), message: '' }
+      : InitialAvaResponse.parse(JSON.parse(raw));
     assertUniqueNeedDescriptions(parsed.user_needs);
-    const needs = parsed.user_needs.map(({ description }, index) => ({
-      id: `need_${index + 1}`,
-      description,
-    }));
-    const remainingIndexes = parsed.user_needs.flatMap(({ status }, index) =>
-      opening || status === 'remaining' ? [index] : [],
+    const needs = Object.freeze(
+      parsed.user_needs.map(({ description, acceptance }, index) =>
+        Object.freeze({
+          id: `need_${index + 1}`,
+          description,
+          acceptance,
+        }),
+      ),
     );
-    const remainingNeedIds = remainingIndexes.map((index) => needs[index]!.id);
-    if (remainingNeedIds.length === 0) {
+    const remainingNeedIds = needs.map(({ id }) => id);
+    if (configuredOpening) {
       this.#needs = needs;
       this.#remainingNeedIds = remainingNeedIds;
-      return this.#terminalTurn();
+      return {
+        message: this.#initialPrompt!.trim(),
+        stop: false,
+        needs,
+        remainingNeeds: needs,
+        focusNeedId: null,
+        source: 'configured_initial_prompt',
+      };
     }
-    const focusNeedId = needs[remainingIndexes[0]!]!.id;
+    const focusNeedId = needs[0]!.id;
     const turn: AvaTurn = {
-      message: assertSafeGeneratedMessage(parsed.message, focusNeedId, needs),
+      message: validateGeneratedMessage(parsed.message, focusNeedId, needs),
       stop: false,
       remainingNeeds: remainingNeedIds.map(
         (id) => needs.find((need) => need.id === id)!,
@@ -409,7 +463,7 @@ export class AvaRolePlayer {
       return this.#terminalTurn();
     }
     const turn: AvaTurn = {
-      message: assertSafeGeneratedMessage(
+      message: validateGeneratedMessage(
         parsed.message,
         parsed.focusNeedId!,
         this.#needs!,
@@ -442,7 +496,7 @@ export class AvaRolePlayer {
     };
   }
 
-  #errorTurn(error: AvaError): AvaTurn {
+  #errorTurn(error: AvaError, source: AvaTurn['source']): AvaTurn {
     return {
       message: '',
       stop: true,
@@ -450,7 +504,7 @@ export class AvaRolePlayer {
         this.#remainingNeedIds === undefined ? null : this.#remainingNeeds(),
       needs: this.#needs ?? null,
       focusNeedId: null,
-      source: 'generated',
+      source,
       error,
     };
   }

@@ -55,7 +55,12 @@ describe('unified live end-to-end suite', () => {
     );
     const answers = [
       {
-        user_needs: [{ description: 'Receive HELLO', status: 'remaining' }],
+        user_needs: [
+          {
+            description: 'Receive HELLO',
+            acceptance: 'The answer is exactly HELLO.',
+          },
+        ],
         message: 'Please reply with HELLO.',
       },
       { remaining_need_ids: [], message: '' },

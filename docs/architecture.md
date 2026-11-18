@@ -719,6 +719,19 @@ platform, and bounded public JSON config. The composition's adapter must match
 that ID and implement pure synchronous preflight. Private paths, credentials,
 or inferred host settings do not belong in runtime config.
 
+Workspace `listFiles` accepts optional `excludeDirectoryNames`: case-sensitive,
+literal directory basenames. Names must be safe, non-empty workspace path
+segments; paths, `.` and `..` are rejected. Matching directories and their
+descendants are omitted before counting entries or descending, including when `under` is
+inside an excluded directory. Files and symlinks with those names remain
+listed. On entry overflow, implementations reject with `WorkspaceEntryLimitError`
+from `@stripe/forge`, carrying `maxEntries` and the bounded, lexically sorted
+`entries` reached before traversal stopped. Entries survive overflow shallowest
+first, then by code-unit path order at each depth, and the retained subset is
+returned in code-unit path order. A budget consumed by shallow directories can
+leave no files in that subset. Other failures, including cancellation, still
+reject without partial evidence.
+
 ### Built-in Docker runtime
 
 [`src/runtime/docker`](https://github.com/stripe/forge/tree/main/src/runtime/docker) implements `forge/docker`
@@ -1003,18 +1016,53 @@ later require a judge.
 not an adapter or completion-provider feature. The provider supplies only
 structured completions.
 
-Ava privately derives up to six high-level needs, each at most 240 characters,
-from the case task and context. It focuses on one remaining need at a time and
-emits user messages of at most 500 characters. Its private need model is never
-sent to the coding agent. A configured
-initial prompt is sent verbatim before Ava initializes; otherwise Ava generates
-the opening turn.
+Ava privately derives up to six high-level needs from the case task and context.
+Each has a description and an `acceptance` statement, each at most 240 characters.
+The runner freezes both at initialization. Continuation prompts judge against
+that acceptance statement and forbid adding conditions or requiring more detail
+once it is met. Both initialization and continuation prompts present context as
+binding constraints: no need or demand may contradict it,
+and any choice it allows satisfies the relevant need. It focuses on one
+remaining need at a time and emits user messages of at most 500 characters. The
+runner does not forward the private need model as an agent message. A shared
+rule in initialization and continuation prompts forbids revealing, quoting,
+copying, or summarizing private IDs, descriptions, acceptance statements, the
+checklist, or remaining needs. Ava must speak as a developer in its own words
+about the focused outcome. Runtime validation rejects internal need ID tokens
+(`need_` followed by digits as a whole word) and verbatim copies of a
+non-focused need's full description or full acceptance statement that have at
+least four whitespace-separated words and 24 characters. Matching ignores case
+and normalizes whitespace to single spaces before applying both thresholds and
+comparing. Ordinary checklist/grading words and shorter private text are
+prompt-only, as is the focused need's own text, including text another need
+shares with it. A paraphrase or a short private
+value can leak undetected; the shared prompt rule covers these cases.
+Schema, size, and single-message format checks remain. A false disclosure rejection can exhaust
+retries and fail the eval, so the runtime does not compare other private text.
+Ava initializes before the first agent answer unless the configured opening is
+terminal. With a nonterminal configured initial prompt, a needs-only completion
+runs before that opening is sent verbatim; otherwise Ava generates the opening
+and needs together.
+The first agent answer follows the continuation path in both cases.
+A nonterminal configured opening therefore adds one Ava call (with a larger
+output budget) per eval, which includes every bundled multi-turn case; provider
+output floors can make that budget increase a no-op.
+Configured openings containing the stop sentinel skip initialization and keep a
+null private-state audit: the runner sends the opening once and stops after the
+agent's answer.
+
+Runs produced before needs were initialized ahead of the first answer and
+acceptance was fixed have different Ava semantics, so do not pool their scores
+with later runs. Plans record the Forge version, which does not change between
+development builds and carries no separate Ava version. Initialized runs
+record `acceptance` on every need in `interaction.json`; older runs omit it.
 
 [`runConversation`](https://github.com/stripe/forge/blob/main/src/interaction/conversation.ts) alternates Ava decisions
-and sends through one agent session. Ava assesses every completed response,
-including the final allowed turn. The loop stops with:
+and sends through one agent session. Except for terminal configured openings,
+Ava assesses every completed response, including the final allowed turn.
+The loop stops with:
 
-- `task_complete` when no needs remain;
+- `task_complete` when no needs remain or a configured sentinel turn completes;
 - `max_turns` after the final response has been assessed; or
 - `role_player_error` after structured-output/request retry exhaustion.
 
@@ -1025,17 +1073,20 @@ trajectory and records a null agent session identity.
 
 Exhausted decisions record a final `message` alongside the error type, attempt
 count, and summary explanation in `interaction.json` and `result.json`.
+A failure before a configured opening (needs-only initialization) is recorded
+with source `configured_initial_prompt` and an empty message, because the
+authored opening was never sent; other failures record source `generated`.
 Parse messages identify invalid JSON, the first fixed-schema path/category,
-or the specific Ava rule violated (such as a list or leaked private need).
+or the specific Ava format rule violated (such as a list or code fence).
 They never include rejected responses, received values, or unknown keys.
 Request messages retain a bounded, credential-redacted provider error message,
 using the same policy as criterion judging. Standalone Ava callers can provide
 `redactionSecrets` in execution options for custom invokers. These diagnostics
 do not change retries or stop semantics.
 
-`interaction.json` is a post-run audit of public turns plus Ava's need and
-decision history. It is never an execution input and is never supplied to the
-criterion judge.
+`interaction.json` is a post-run audit of public turns plus Ava's needs, their
+acceptance statements, and decision history. Older records may omit `acceptance`.
+It is never an execution input and is never supplied to the criterion judge.
 
 ### Host-side completion providers
 
@@ -1577,11 +1628,25 @@ are an area for future expansion; no extraction or conversion is performed.
 These exclusions apply to workspace text collection; deterministic file checks
 and transcript tool results retain their existing evidence policies.
 
-Its hard bounds are 10,000 listed entries,
+It passes directory exclusions to the workspace so ignored trees are neither
+traversed nor counted against the entry limit. Its hard bounds are 10,000 listed
+entries,
 depth 32, two seconds, 512,000 bytes read, 20,000 characters per file, and 80,000
-rendered characters total. Truncation and unavailable evidence are recorded
-explicitly. `judge-evidence.json` records the redacted workspace subset and
-exact projected transcript for audit; it is not an input to a later judge call.
+rendered characters total. On entry overflow, the collector keeps the files
+reached in the partial listing in lexical order, subject to the remaining
+collection bounds. It also bounds overlong listings returned by external
+runtimes. A `workspace_entry_limit_reached` warning tells the judge that the
+listing was truncated and names the limit. Recovery uses `WorkspaceEntryLimitError`;
+older runtimes may ignore exclusions and throw a plain error. A legacy limit-message
+check preserves their entry-limit warning, with an explicit unavailable warning
+when no partial listing was supplied. Their lost file text cannot be recovered.
+`judge-evidence.json` records the redacted workspace subset, warnings, and exact
+projected transcript for audit and regrade. Its optional `workspace.truncated`
+flag records whether any collection or rendering bound was hit, including per-file
+text truncation, rather than only listing truncation. `workspace.complete: false`
+also covers omissions and read failures that hit no bound. Older artifacts may
+omit `truncated`; absence does not mean false, so readers must also inspect
+`workspace.complete` and warnings.
 
 At most four criteria run concurrently. Each request carries a 1,024-token
 output budget and a strict one-criterion JSON schema, with no temperature;

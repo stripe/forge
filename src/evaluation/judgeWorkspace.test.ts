@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
 import { describe, it } from 'vitest';
 
-import type {
-  ReadonlyWorkspace,
-  WorkspaceEntry,
-  WorkspaceListOptions,
+import {
+  type ReadonlyWorkspace,
+  type WorkspaceEntry,
+  WorkspaceEntryLimitError,
+  type WorkspaceListOptions,
 } from '../contracts/runtime.ts';
+import { createMemoryWorkspace } from '../testing/memoryWorkspace.ts';
 import {
   boundJudgeWorkspaceEvidence,
   collectJudgeWorkspaceEvidence,
@@ -57,8 +59,9 @@ function fixture(
         request.maxEntries !== undefined &&
         entries.length > request.maxEntries
       ) {
-        throw new Error(
-          `Workspace exceeds its ${request.maxEntries} entry limit.`,
+        throw new WorkspaceEntryLimitError(
+          request.maxEntries,
+          entries.slice(0, request.maxEntries),
         );
       }
       return entries;
@@ -86,6 +89,30 @@ function file(path: string, size: number): WorkspaceEntry {
 }
 
 describe('collectJudgeWorkspaceEvidence', () => {
+  it('keeps app files when ignored dependencies alone exceed the hard entry limit', async () => {
+    const dependencies = Object.fromEntries(
+      Array.from({ length: MAX_JUDGE_WORKSPACE_ENTRIES + 1 }, (_, index) => [
+        `node_modules/pkg/file-${index}.js`,
+        'dependency',
+      ]),
+    );
+    const workspace = createMemoryWorkspace({
+      ...dependencies,
+      'src/node_modules/pkg/index.js': 'nested dependency',
+      'src/app.ts': 'app source',
+      'README.md': 'app docs',
+    }).readonly;
+    const collected = await collectJudgeWorkspaceEvidence(workspace);
+    assert.deepEqual(
+      collected.evidence.entries.map(({ path }) => path),
+      ['README.md', 'src/app.ts'],
+    );
+    assert.equal(collected.evidence.complete, true);
+    assert.equal(collected.evidence.truncated, false);
+    assert.match(collected.renderedText, /app source/);
+    assert.doesNotMatch(collected.renderedText, /dependency/);
+  });
+
   it('returns empty, complete, JSON-safe evidence for an empty workspace', async () => {
     const collected = await collectJudgeWorkspaceEvidence(fixture().workspace);
 
@@ -294,11 +321,113 @@ describe('collectJudgeWorkspaceEvidence', () => {
       maxEntries: 1,
     });
     assert.equal(collected.evidence.truncated, true);
-    assert.equal(collected.evidence.entries.length, 0);
+    assert.deepEqual(
+      collected.evidence.entries.map(({ path }) => path),
+      ['a.txt'],
+    );
+    assert.match(collected.renderedText, /truncated.*entry limit of 1/);
+    assert.match(collected.renderedText, /### a\.txt/);
     assert.equal(
       collected.evidence.warnings[0]?.code,
       'workspace_entry_limit_reached',
     );
+  });
+
+  it('marks evidence unavailable when a legacy runtime ignores exclusions and throws an untyped limit error', async () => {
+    const test = fixture({
+      listError: new Error('Workspace entry limit exceeded: sensitive detail'),
+    });
+    const collected = await collectJudgeWorkspaceEvidence(test.workspace, {
+      maxEntries: 1,
+    });
+    assert.ok(
+      test.listOptions[0]?.excludeDirectoryNames?.includes('node_modules'),
+    );
+    assert.deepEqual(test.reads, []);
+    assert.deepEqual(collected.evidence.entries, []);
+    assert.equal(collected.evidence.complete, false);
+    assert.equal(collected.evidence.truncated, true);
+    assert.deepEqual(
+      collected.evidence.warnings.map(({ code }) => code),
+      ['workspace_entry_limit_reached', 'workspace_listing_unavailable'],
+    );
+    assert.match(
+      collected.renderedText,
+      /no partial listing.*workspace text is unavailable/,
+    );
+    assert.doesNotMatch(JSON.stringify(collected), /sensitive detail/);
+  });
+
+  it('retains a sorted prefix if an external workspace ignores exclusions and returns more than requested', async () => {
+    const test = fixture({ bodies: { 'a.txt': 'a', 'z.txt': 'z' } });
+    const workspace = {
+      ...test.workspace,
+      listFiles: async () => [file('z.txt', 1), file('a.txt', 1)],
+    };
+    const collected = await collectJudgeWorkspaceEvidence(workspace, {
+      maxEntries: 1,
+    });
+    assert.deepEqual(
+      collected.evidence.entries.map(({ path }) => path),
+      ['a.txt'],
+    );
+    assert.equal(collected.evidence.truncated, true);
+    assert.equal(collected.evidence.complete, false);
+    assert.match(
+      collected.renderedText,
+      /listing was truncated.*entry limit of 1/,
+    );
+    assert.deepEqual(
+      test.reads.map(({ path }) => path),
+      ['a.txt'],
+    );
+  });
+
+  it('records the entry limit once when a typed error carries more entries than requested', async () => {
+    const test = fixture({ bodies: { 'a.txt': 'a', 'b.txt': 'b' } });
+    const workspace = {
+      ...test.workspace,
+      listFiles: async () => {
+        throw new WorkspaceEntryLimitError(2, [
+          file('z.txt', 1),
+          file('b.txt', 1),
+          file('a.txt', 1),
+        ]);
+      },
+    };
+    const collected = await collectJudgeWorkspaceEvidence(workspace, {
+      maxEntries: 2,
+    });
+    assert.deepEqual(
+      collected.evidence.warnings.map(({ code }) => code),
+      ['workspace_entry_limit_reached'],
+    );
+    assert.deepEqual(
+      collected.evidence.entries.map(({ path }) => path),
+      ['a.txt', 'b.txt'],
+    );
+    assert.equal(collected.evidence.truncated, true);
+  });
+
+  it('drops ineligible entries before capping a listing that ignored the exclusions', async () => {
+    const test = fixture({ bodies: { 'src/app.ts': 'app' } });
+    const workspace = {
+      ...test.workspace,
+      listFiles: async () => [
+        file('node_modules/a/index.js', 1),
+        file('node_modules/b/index.js', 1),
+        file('src/app.ts', 3),
+      ],
+    };
+    const collected = await collectJudgeWorkspaceEvidence(workspace, {
+      maxEntries: 2,
+    });
+    assert.deepEqual(
+      collected.evidence.entries.map(({ path }) => path),
+      ['src/app.ts'],
+    );
+    assert.deepEqual(collected.evidence.warnings, []);
+    assert.equal(collected.evidence.truncated, false);
   });
 
   it('stops in lexical order before evidence beyond the depth bound', async () => {
