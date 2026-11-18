@@ -23,8 +23,8 @@ documented public contracts or explicit, immutable action bundles. Do not add
 global implementation discovery, YAML-driven imports, or hidden
 process-environment fallbacks; keep private host implementations out of the core.
 
-Before changing behavior or public exports, read `README.md`, `package.json`,
-and `docs/architecture.md`. Use `docs/codebase-guide.md` for detailed code
+Before changing behavior or public exports, read `README.md`,
+`docs/reference.md`, `package.json`, and `docs/architecture.md`. Use `docs/codebase-guide.md` for detailed code
 navigation. Those documents, the implementation, and tests are the sources of
 truth for feature details; do not duplicate their full specifications here.
 
@@ -203,7 +203,8 @@ journal, rollout plan, test inventory, or exhaustive copy of the implementation.
   `AGENTS.md`, and `docs/` for overlapping coverage.
 - Update or replace existing material instead of appending by default. Remove
   stale or redundant text in the same change.
-- Keep one source of truth: `README.md` owns user workflows;
+- Keep one source of truth: `README.md` owns the overview and first-run
+  quickstart; `docs/reference.md` owns user workflows;
   `docs/architecture.md` owns stable boundaries, lifecycle, and current
   limitations; `docs/codebase-guide.md` owns contributor workflows and navigation;
   feature documents own their exact current contracts; `AGENTS.md` owns
@@ -230,7 +231,8 @@ journal, rollout plan, test inventory, or exhaustive copy of the implementation.
   digests, runtime metadata, and tests.
 - Keep ATIF changes tied to a specific upstream version and update provenance,
   conformance tests, and notices together.
-- Update the README for changes to CLI syntax, requirements, or user workflows;
+- Update `docs/reference.md` for changes to CLI syntax, requirements, or user
+  workflows, and the README only if the overview or quickstart changes;
   update the authoritative guides for schemas, public entry points, security
   properties, or current limitations. Keep public documentation free of private
   infrastructure details and migration-only formats.
