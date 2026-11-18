@@ -91,6 +91,23 @@ models:
   judge: { provider: anthropic, model: claude-sonnet-4-6 }
 ```
 
+By default the judge returns one pass/fail judgment per criterion. To judge by
+verbalized sampling instead, name the method on the judge. The judge then writes
+`candidates` complete answers in one reply (2–10, default 5), each with a reading,
+a rationale, a label, and a weight, and Forge aggregates them:
+
+```yaml
+models:
+  judge: { provider: openai, model: gpt-6.1-sol, mode: verbalized-sampling, candidates: 5 }
+```
+
+Each label's probability is the sum of its candidates' weights divided by the
+total. The criterion passes when the most probable label is `met`; `not_met` and
+`insufficient_evidence` do not pass. A 0.80 threshold only annotates the saved
+decision, so a `met` choice below it still passes. The plan records the method,
+and the saved result keeps every candidate. Omit `mode` to keep the default judge.
+`candidates` is accepted only with `mode`.
+
 OpenAI Ava/judge models use `--credential-env OPENAI_API_KEY`. They use the
 Responses API with strict JSON Schema and `store: false`. `OPENAI_BASE_URL`
 optionally sets the complete API root, including `/v1`; Forge appends
