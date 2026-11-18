@@ -964,7 +964,9 @@ OpenCode requires `model_profile` on the experiment's agent selection during
 pure capability preflight. Its strict shape is
 `{limit: {context, output}, reasoning, temperature, attachment}`: limits are
 positive safe integers, output cannot exceed context, and the three capabilities
-are explicit booleans. Claude Code and Codex reject the field. The adapter writes
+are explicit booleans. Attachments are unsupported and rejected during preflight;
+see the [OpenCode profile setup](../README.md#opencode-setup).
+Claude Code and Codex reject the field. The adapter writes
 the profile plus `tool_call: true` into its generated
 `provider.forge.models[selection.model]` entry and supplies the provider package,
 endpoint, and scoped credential. The main and small model use that same alias.

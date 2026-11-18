@@ -337,6 +337,17 @@ describe('OpenCode adapter', () => {
           launched.stderr.toString(),
           /implicit global configuration/,
         );
+        const test = await fixture(async () => ({
+          ...result(launched.stdout.toString(), launched.status!),
+          stderr: launched.stderr.toString(),
+        }));
+        const session = await test.adapter.openSession(test.context);
+        await assert.rejects(
+          session.send('Do it', { signal: test.context.signal }),
+          /implicit global configuration.*experiment agent selection and forge\/plugin/,
+        );
+        assert.equal(test.calls.length, 1);
+        assert.equal(session.sessionId(), undefined);
         for (const child of ['home', 'config', 'data'])
           await rm(path.join(directory, child), {
             recursive: true,
@@ -345,6 +356,36 @@ describe('OpenCode adapter', () => {
       }
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it('exposes only the bounded, fixed launcher refusal from unsuccessful stderr', async () => {
+    const refusal =
+      'OpenCode implicit global configuration is unsupported. Use the experiment agent selection and forge/plugin.';
+    const generic = 'OpenCode exited without a successful completed turn.';
+    const boundary = `${'x'.repeat(4096 - refusal.length - 1)}\n${refusal}`;
+    for (const [stderr, expected] of [
+      [refusal, refusal],
+      [`secret=private\n${refusal}\r\n\u001b[31mprivate\u001b[0m`, refusal],
+      [`${refusal}\n${'private'.repeat(1000)}`, refusal],
+      ['', generic],
+      ['secret=private\n\u001b[31munknown failure\u001b[0m', generic],
+      [`${refusal} secret=private`, generic],
+      [`\u001b[31m${refusal}\u001b[0m`, generic],
+      [`${'x'.repeat(4096)}\n${refusal}`, generic],
+      [`${boundary} secret=private`, generic],
+      [`${boundary}\u001b[31mprivate\u001b[0m`, generic],
+    ]) {
+      const test = await fixture(async () => ({
+        ...result('', 1),
+        stderr: stderr!,
+      }));
+      const session = await test.adapter.openSession(test.context);
+      await assert.rejects(
+        session.send('Do it', { signal: test.context.signal }),
+        { message: expected },
+      );
+      assert.equal(test.calls.length, 1);
+      assert.equal(session.sessionId(), undefined);
     }
   });
   it('invalidates stale exports and preserves a completed turn when export fails', async () => {
@@ -467,6 +508,25 @@ describe('OpenCode adapter', () => {
     });
     assert.throws(() => adapter.requirements(missing), /model_profile/);
     assert.throws(() => adapter.evidenceIdentity(missing), /model_profile/);
+  });
+  it('rejects attachment support during pure capability preflight', () => {
+    const adapter = createOpenCodeAdapter({
+      baseUrl: 'https://gateway.example/v1',
+    });
+    const attachments = {
+      ...selection,
+      model_profile: { ...OPEN_CODE_MODEL_PROFILE, attachment: true },
+    };
+    for (const preflight of [
+      () => adapter.requirements(attachments),
+      () => adapter.evidenceIdentity(attachments),
+    ])
+      assert.throws(preflight, {
+        name: 'TypeError',
+        message:
+          /model_profile\.attachment: true.*input modalities.*attachment evidence/,
+      });
+    assert.equal(attachments.model_profile.attachment, true);
   });
   it('ignores workspace opencode.json and writes the same model for baseline and Stripe plugin arms', async () => {
     const definitions: unknown[] = [];

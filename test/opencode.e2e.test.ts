@@ -15,6 +15,7 @@ import {
 } from '../src/index.js';
 import {
   createFakeRuntimeAdapter,
+  createMemoryArtifactStore,
   createMemoryRunInputProvider,
   createScriptedCompletionProvider,
   createStaticCredentialResolver,
@@ -31,6 +32,48 @@ import {
 
 const SECRET = 'test-opencode-secret-only-agent';
 describe('OpenCode engine integration', () => {
+  it('rejects attachments before credentials, commands, runtime allocation, or artifacts', async () => {
+    const plan = createTestResolvedRunPlan({
+      agent: {
+        adapter: 'opencode',
+        provider: 'openai-compatible',
+        model: OPEN_CODE_MODEL,
+        model_profile: { ...OPEN_CODE_MODEL_PROFILE, attachment: true },
+      },
+    });
+    const agent = createOpenCodeAdapter({
+      baseUrl: 'https://gateway.example/v1',
+    });
+    const runtime = createFakeRuntimeAdapter({
+      command() {
+        assert.fail('Preflight must not run commands.');
+      },
+    });
+    const artifacts = createMemoryArtifactStore();
+    const resolved: string[] = [];
+    const composition = {
+      runtime: runtime.adapter,
+      agents: new Map([[agent.id, agent]]),
+      completionProviders: new Map(),
+      credentialResolver: createStaticCredentialResolver(
+        { 'opencode.api-key': SECRET },
+        { onResolve: (reference) => resolved.push(reference) },
+      ),
+      inputProvider: createMemoryRunInputProvider(),
+      artifactStore: artifacts.store,
+    };
+    assert.throws(() => preflightEval({ plan, composition }), {
+      code: 'invalid_plan',
+      phase: 'preflight',
+    });
+    await assert.rejects(
+      executeEval({ runId: 'unsupported-attachments', plan, composition }),
+      { code: 'invalid_plan', phase: 'preflight' },
+    );
+    assert.deepEqual(resolved, []);
+    assert.equal(runtime.runs.length, 0);
+    assert.deepEqual(artifacts.events, []);
+  });
   for (const mode of ['one_shot', 'multi_turn'] as const) {
     it(`commits and independently verifies ${mode} native evidence, redaction, and restricted bytes`, async () => {
       const root = await fs.mkdtemp(
