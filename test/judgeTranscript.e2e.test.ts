@@ -524,3 +524,87 @@ it('counts result redactions for calls the fallback call budget drops, but not t
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+it.each([
+  { withOutputs: false, expectOmitted: false },
+  { withOutputs: true, expectOmitted: true },
+])(
+  'omits the fallback transcript when only the tool outputs push it over the judge budget (outputs=$withOutputs)',
+  async ({ withOutputs, expectOmitted }) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-outputs-'));
+    try {
+      const plan = createTestResolvedRunPlan({
+        judgingCriteria: ['The observed result reports success.'],
+        judge: { provider: 'test-provider', model: 'judge' },
+      });
+      // The conversation and commands alone are far below the 1 MiB budget;
+      // 200 results of 8,000 code units each are not.
+      const agent = createScriptedAgentAdapter({
+        turns: [
+          {
+            text: 'Done.',
+            sessionId: 'selected',
+            toolCalls: Array.from({ length: 200 }, (_, index) => ({
+              id: `call-${index}`,
+              name: 'Bash',
+              input: { command: `echo ${index}` },
+              ...(withOutputs
+                ? { result: { content: 'o'.repeat(8_000) } }
+                : {}),
+            })),
+          },
+        ],
+      });
+      const completion = createScriptedCompletionProvider({
+        requirements: {
+          credentials: {
+            token: { reference: credentialReference('test.key') },
+          },
+        },
+        responses: [
+          JSON.stringify({
+            results: [{ index: 0, passed: true, explanation: 'Judged.' }],
+          }),
+        ],
+      });
+      const completed = await executeEval({
+        runId: 'outputs-over-budget',
+        plan,
+        composition: {
+          runtime: createFakeRuntimeAdapter().adapter,
+          agents: new Map([[agent.adapter.id, agent.adapter]]),
+          completionProviders: new Map([
+            [completion.provider.id, completion.provider],
+          ]),
+          credentialResolver: createStaticCredentialResolver({
+            'test.key': 'synthetic-private-token',
+          }),
+          inputProvider: createMemoryRunInputProvider(),
+          artifactStore: createArtifactStore({ root }),
+        },
+      });
+      await verifyCompletedRun(completed.location);
+      const evidence = parseJudgeEvidence(
+        JSON.parse(
+          await fs.readFile(
+            path.join(completed.location, 'judge-evidence.json'),
+            'utf8',
+          ),
+        ),
+        { forgeVersion: plan.provenance.forge.version },
+      );
+      // Fallback does not budget its tool outputs against the judge prompt, so
+      // the judge falls back to workspace evidence alone.
+      assert.equal(
+        evidence.transcript.omitted,
+        expectOmitted ? 'judge_budget_exceeded' : undefined,
+      );
+      assert.equal(evidence.transcript.steps.length === 0, expectOmitted);
+      const prompt = completion.calls[0]?.request.systemPrompt ?? '';
+      assert.equal(prompt.includes('echo 199'), !expectOmitted);
+      assert.equal(prompt.includes('o'.repeat(100)), false);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  },
+);
