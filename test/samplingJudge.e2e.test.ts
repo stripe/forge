@@ -221,8 +221,7 @@ describe('experiment-selected verbalized-sampling judge', () => {
         r.evaluation.evidence_warnings = [];
       },
     ];
-    for (const edit of edits)
-      await assert.rejects(tamper(edit));
+    for (const edit of edits) await assert.rejects(tamper(edit));
   });
 
   it('keeps the default judge and its saved shape when no method is selected', async () => {
