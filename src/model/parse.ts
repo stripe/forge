@@ -419,6 +419,13 @@ const AgentSelectionSchema = ModelRefSchema.extend({
   adapter: SimpleIdentifierSchema,
   hook_trust: z.enum(['native', 'automation']).optional(),
   model_profile: ModelProfileSchema.optional(),
+  // Never valid; declared only so a removed routing field gets a direct fix.
+  endpoint: z
+    .never({
+      error:
+        'endpoint is not supported: name the service or route with provider: <endpoint name> instead',
+    })
+    .optional(),
 })
   .strict()
   .superRefine((agent, context) => {

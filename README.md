@@ -139,7 +139,9 @@ merchant outside Forge.
 
 OpenCode requires `OPENCODE_BASE_URL`, a Chat Completions API root such as
 `https://gateway.example.com/v1`, and an explicit
-`--credential-env OPENCODE_API_KEY` grant. This supports the
+`--credential-env OPENCODE_API_KEY` grant for the default
+`openai-compatible` provider; other services are named providers (see
+[OpenCode setup](#opencode-setup)). This supports the
 protocol used by LiteLLM and other compatible gateways; each selected model
 must support the configured tools and capabilities. Responses endpoints use
 the separate Codex route. See [OpenCode setup](#opencode-setup).
@@ -341,9 +343,11 @@ for an automatically generated ID. Experiment runs receive their own IDs.
 
 ### OpenCode setup
 
-OpenCode support is experimental. Select `adapter: opencode`,
-`provider: openai-compatible`, and the exact gateway model alias in your
-experiment matrix. Embedded slashes in the model name are preserved.
+OpenCode support is experimental. Select `adapter: opencode`, an
+`openai-compatible` provider, and the exact gateway model alias in your
+experiment matrix. The default provider is named `openai-compatible`; to use
+another service, see [Named providers](#named-providers). Embedded slashes in
+the model name are preserved.
 
 Declare the model's actual limits and capabilities once on the agent selection,
 so every treatment uses the same definition:
@@ -394,7 +398,53 @@ contents, but does not pin future installs. See the
 [plugin contract](docs/plugin-action.md) for installation provenance and source
 selection.
 
-The CLI credential reference is `opencode.api-key`; use
+#### Named providers
+
+An agent's `provider` names the service or route that serves the model, such as
+`openrouter`. Use one name per route to compare inference providers for the
+same model. The name is a logical label, not a URL or credential. Arms that
+differ only by provider are different selections and separate report groups,
+and the name is recorded in `plan.json` and the selection copy in `result.json`.
+The public names `anthropic`, `openai`, and `openai-compatible` remain valid;
+each is its own integration.
+
+```yaml
+matrix:
+  agents:
+    - { adapter: opencode, provider: openrouter, model: gateway-code,
+        model_profile: { ... } }
+    - { adapter: opencode, provider: openai-compatible, model: gateway-code,
+        model_profile: { ... } }
+```
+
+The host maps each name to an API integration, an API root, and a credential;
+Forge does not write the URL or key into the plan, results, or reports. The CLI
+configures OpenCode providers, which are always `openai-compatible`, from the
+environment:
+
+```sh
+export OPENCODE_PROVIDER_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+export OPENCODE_PROVIDER_OPENROUTER_API_KEY=your-openrouter-key
+# grant it explicitly alongside the other credentials:
+#   --credential-env OPENCODE_PROVIDER_OPENROUTER_API_KEY
+```
+
+CLI provider names use lowercase letters, digits, and underscores; the
+credential reference is `opencode.provider.<name>.api-key`. Selections of
+`openai-compatible` keep `OPENCODE_BASE_URL` and `OPENCODE_API_KEY`. A provider
+with no `OPENCODE_PROVIDER_<NAME>_BASE_URL` fails before any credential lookup,
+as does a provider whose integration the adapter does not support. The name
+does not capture where the host sends it, so use the same host mapping when
+resuming. Two exceptions remain: if the agent echoes the URL in its own output,
+that text is kept in the normalized transcript (`trajectory.json`,
+`interaction.json`), and the restricted native artifact keeps raw agent output
+unredacted. Embedding hosts supply the same mapping through
+`createOpenCodeAdapter({ providers })`.
+
+Experiment files that used an `endpoint` field must replace it with
+`provider: <endpoint name>`; `endpoint` is rejected.
+
+The CLI credential reference for the default provider is `opencode.api-key`; use
 `--credential-env opencode.api-key=MY_GATEWAY_KEY` to bind another environment
 variable. Ava and judging keep their independent host-model configuration;
 the example grants OpenAI access for their defaults. One-shot cases with only

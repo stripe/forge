@@ -477,6 +477,7 @@ implementations.
 | [`observability.ts`](https://github.com/stripe/forge/blob/main/src/contracts/observability.ts) | `RunPhase`, `RunEventType`, `RunEvent`, `RunObserver` | `execution/events.ts` emits events and isolates observer failures |
 | [`plugin.ts`](https://github.com/stripe/forge/blob/main/src/contracts/plugin.ts) | `AgentPluginInstaller`, prepared install operation, receipt shape | Implemented by Claude Code, Codex, and OpenCode; selected by `setup/forgePlugin.ts` |
 | [`pluginReceipt.ts`](https://github.com/stripe/forge/blob/main/src/contracts/pluginReceipt.ts) | `parseAgentPluginInstallationReceipt` | Called by plugin setup before it returns a resolution and by completed-run verification |
+| [`providers.ts`](https://github.com/stripe/forge/blob/main/src/contracts/providers.ts) | `ProviderConfiguration`, `ProviderLookup`, `createProviderLookup`, `resolveProvider`, `ProviderConfigurationError` | Host-owned map from an agent selection's logical `provider` name to integration, API root, and credential; resolved by the three adapters |
 | [`metadata.ts`](https://github.com/stripe/forge/blob/main/src/contracts/metadata.ts) | Adapter/provider configuration metadata types and strict internal snapshot schemas | Shared by pure execution preflight and result parsing |
 | [`index.ts`](https://github.com/stripe/forge/blob/main/src/contracts/index.ts) | Public contracts barrel | Re-exported by the package root |
 
@@ -676,7 +677,8 @@ the actual standard-bundle source path.
 `index.ts` owns routing, isolated state, version verification, stdin execution,
 exact-session resumption, and pre-quiescence exports. It generates model config
 from the selected `model_profile`; workspace `opencode.json` is ignored.
-`launcher.ts` supplies the prompt file to stdin.
+`launcher.ts` supplies the prompt file to stdin. `providers.ts` maps the CLI's
+`OPENCODE_PROVIDER_<NAME>_*` host variables to named provider configurations.
 `stream.ts` validates completed live part snapshots. `evidence.ts` reads the
 sealed export and converts supported native content to ATIF, using bounded
 JSON helpers in `native.ts`. `layout.ts` validates external-runtime paths.

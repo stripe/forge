@@ -295,13 +295,29 @@ http_headers={"X-Wrong"="synthetic-secret"}
 
   it('requires the configured adapter and provider before declaring authority', () => {
     const adapter = createCodexAdapter();
-    for (const mismatch of [
-      { ...selection, adapter: 'other-agent' },
-      { ...selection, provider: 'other-provider' },
-    ]) {
-      assert.throws(() => adapter.requirements(mismatch), /does not match/);
-      assert.throws(() => adapter.evidenceIdentity(mismatch), /does not match/);
-    }
+    const adapterMismatch = { ...selection, adapter: 'other-agent' };
+    assert.throws(
+      () => adapter.requirements(adapterMismatch),
+      /does not match/,
+    );
+    assert.throws(
+      () => adapter.evidenceIdentity(adapterMismatch),
+      /does not match/,
+    );
+    const providerMismatch = { ...selection, provider: 'other-provider' };
+    const unknown =
+      /Provider "other-provider" is not configured for Codex; configured providers: openai\./;
+    assert.throws(() => adapter.requirements(providerMismatch), unknown);
+    assert.throws(() => adapter.evidenceIdentity(providerMismatch), unknown);
+    // A host-chosen name is the one configured provider, with the openai integration.
+    const named = createCodexAdapter({ provider: 'stripe-llm-gateway' });
+    assert.doesNotThrow(() =>
+      named.requirements({ ...selection, provider: 'stripe-llm-gateway' }),
+    );
+    assert.throws(
+      () => named.requirements(selection),
+      /Provider "openai" is not configured for Codex; configured providers: stripe-llm-gateway\./,
+    );
   });
 
   it('binds compatible Responses endpoints to an environment name, not a secret or reference in argv', async () => {

@@ -17,4 +17,5 @@ export type {
 } from './observability.ts';
 export * from './plugin.ts';
 export * from './pluginReceipt.ts';
+export * from './providers.ts';
 export * from './runtime.ts';

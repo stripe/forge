@@ -7,6 +7,12 @@ import {
   type CredentialReference,
   credentialReference,
 } from '../../contracts/credentials.ts';
+import {
+  createProviderLookup,
+  type ProviderConfiguration,
+  resolveProvider,
+} from '../../contracts/providers.ts';
+import { isSafeSimpleIdentifier } from '../../model/paths.ts';
 import type { AgentSelectionV1 } from '../../model/types.ts';
 import { FORGE_OPENCODE_VERSION } from '../../runtime/docker/assets.ts';
 import { FORGE_VERSION } from '../../version.ts';
@@ -38,7 +44,17 @@ export interface OpenCodeAdapterOptions {
   readonly credential?: string | CredentialReference;
   /** Explicit Chat Completions API root, including /v1 when needed. Required when selected. */
   readonly baseUrl?: string;
+  /**
+   * Host-configured providers by logical name. A selection's `provider` picks
+   * one whose integration is `openai-compatible`; each supplies its own
+   * `baseUrl` and optionally `credential`, which defaults to `credential`
+   * above. `baseUrl` and `credential` above configure the public default
+   * provider `openai-compatible`, which `providers` must not redefine.
+   */
+  readonly providers?: Readonly<Record<string, ProviderConfiguration>>;
 }
+
+const DEFAULT_PROVIDER = 'openai-compatible';
 
 /** API-key OpenCode execution inside a runtime providing Docker-equivalent isolation. */
 export function createOpenCodeAdapter(
@@ -66,17 +82,49 @@ export function createOpenCodeAdapter(
   const credential = credentialReference(
     options.credential ?? 'opencode.api-key',
   );
+  const configured = Object.entries(options.providers ?? {});
+  for (const [name, configuration] of configured) {
+    if (!isSafeSimpleIdentifier(name) || name === DEFAULT_PROVIDER)
+      throw new TypeError(
+        `OpenCode provider name ${JSON.stringify(name)} must be a safe identifier other than ${DEFAULT_PROVIDER}.`,
+      );
+    if (configuration.integration === 'openai-compatible') {
+      if (configuration.baseUrl === undefined)
+        throw new TypeError(
+          `OpenCode provider ${JSON.stringify(name)} requires a baseUrl.`,
+        );
+      validateBaseUrl(configuration.baseUrl);
+    }
+  }
+  const providers = createProviderLookup({
+    ...(baseUrl === undefined
+      ? {}
+      : {
+          [DEFAULT_PROVIDER]: {
+            integration: 'openai-compatible' as const,
+            baseUrl,
+            credential,
+          },
+        }),
+    ...Object.fromEntries(configured),
+  });
   const requirements = (
     selection: AgentSelectionV1,
   ): AgentRuntimeRequirements => {
-    if (selection.adapter !== id || selection.provider !== 'openai-compatible')
-      throw new TypeError(
-        'OpenCode requires the selected adapter and openai-compatible provider.',
-      );
-    if (baseUrl === undefined)
+    if (selection.adapter !== id)
+      throw new TypeError('OpenCode does not match the selected adapter.');
+    if (selection.provider === DEFAULT_PROVIDER && baseUrl === undefined)
       throw new TypeError(
         'OpenCode requires an explicit baseUrl (OPENCODE_BASE_URL in the CLI).',
       );
+    const route = resolveProvider(providers, 'OpenCode', selection.provider, [
+      'openai-compatible',
+    ]);
+    const routeBaseUrl = route.baseUrl!;
+    const routeCredential =
+      route.credential === undefined
+        ? credential
+        : credentialReference(route.credential);
     if (!selection.model || /[\u0000-\u001f\u007f]/.test(selection.model))
       throw new TypeError('OpenCode requires an explicit model.');
     if (selection.model_profile === undefined)
@@ -116,12 +164,15 @@ export function createOpenCodeAdapter(
                   },
                 },
                 env: ['OPENCODE_API_KEY'],
-                options: { baseURL: baseUrl, apiKey: '{env:OPENCODE_API_KEY}' },
+                options: {
+                  baseURL: routeBaseUrl,
+                  apiKey: '{env:OPENCODE_API_KEY}',
+                },
               },
             },
           }),
         },
-        credentials: { OPENCODE_API_KEY: { reference: credential } },
+        credentials: { OPENCODE_API_KEY: { reference: routeCredential } },
       },
       stateDirectories: [
         { id: OPENCODE_STATE_ID, containerPath: layout.stateDirectory },

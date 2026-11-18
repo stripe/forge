@@ -167,6 +167,50 @@ describe('public benchmark parsing', () => {
       /unique/,
     );
   });
+  it('treats provider as route identity and rejects the removed endpoint field', () => {
+    const config = parseExperimentConfig(
+      parseExperimentConfigYaml(experimentConfigYaml()),
+    );
+    const agent = {
+      adapter: 'opencode',
+      provider: 'openrouter',
+      model: 'gateway-code',
+      model_profile: OPEN_CODE_MODEL_PROFILE,
+    };
+    const parse = (...agents: unknown[]) =>
+      parseExperimentConfig({
+        ...config,
+        matrix: { ...config.matrix, agents },
+      });
+    // Arms that differ only by provider name are distinct selections.
+    const groups = getMatrixGroups(
+      parse(
+        agent,
+        { ...agent, provider: 'gateway-direct' },
+        { ...agent, provider: 'openai-compatible' },
+      ).matrix,
+    )[0]!;
+    assert.deepEqual(
+      groups.agents.map(({ provider }) => provider),
+      ['openrouter', 'gateway-direct', 'openai-compatible'],
+    );
+    assert.throws(() => parse(agent, { ...agent }), /unique/);
+    for (const provider of ['', 'Open Router', 'https://x.example'])
+      assert.throws(() => parse({ ...agent, provider }), BenchmarkModelError);
+    // The retired routing field names its replacement; it is never mapped.
+    for (const adapter of ['opencode', 'claude-code', 'codex'])
+      assert.throws(
+        () =>
+          parse({
+            ...agent,
+            adapter,
+            provider: 'openai-compatible',
+            endpoint: 'openrouter',
+          }),
+        /endpoint is not supported: name the service or route with provider: <endpoint name> instead/,
+      );
+  });
+
   it('strictly validates model profiles and rejects them for Claude Code and Codex', () => {
     const config = parseExperimentConfigYaml(experimentConfigYaml());
     const agent = {

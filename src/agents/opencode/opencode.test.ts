@@ -147,6 +147,72 @@ describe('OpenCode adapter', () => {
     assert.ok(test.calls.some(({ argv }) => argv.includes('--session')));
   });
 
+  it('routes each selection by provider name to its host-configured API root and credential', () => {
+    const providers = {
+      openrouter: {
+        integration: 'openai-compatible' as const,
+        baseUrl: 'https://openrouter.example/api/v1',
+        credential: 'opencode.provider.openrouter.api-key',
+      },
+      'gateway-direct': {
+        integration: 'openai-compatible' as const,
+        baseUrl: 'https://direct.example/v1',
+      },
+      claude: { integration: 'anthropic' as const },
+    };
+    const adapter = createOpenCodeAdapter({
+      baseUrl: 'https://gateway.example/v1',
+      credential: 'opencode.api-key',
+      providers,
+    });
+    const routeOf = (provider: string) => {
+      const requirements = adapter.requirements({ ...selection, provider });
+      return {
+        baseURL: JSON.parse(
+          requirements.environment.variables!.OPENCODE_CONFIG_CONTENT!,
+        ).provider.forge.options.baseURL,
+        credential:
+          requirements.environment.credentials!.OPENCODE_API_KEY!.reference,
+      };
+    };
+    assert.deepEqual(routeOf('openrouter'), {
+      baseURL: 'https://openrouter.example/api/v1',
+      credential: 'opencode.provider.openrouter.api-key',
+    });
+    // A provider without its own credential uses the adapter's.
+    assert.deepEqual(routeOf('gateway-direct'), {
+      baseURL: 'https://direct.example/v1',
+      credential: 'opencode.api-key',
+    });
+    assert.deepEqual(routeOf('openai-compatible'), {
+      baseURL: 'https://gateway.example/v1',
+      credential: 'opencode.api-key',
+    });
+    // Named providers work without the default; the default then needs a baseUrl.
+    const namedOnly = createOpenCodeAdapter({ providers });
+    assert.doesNotThrow(() =>
+      namedOnly.requirements({ ...selection, provider: 'openrouter' }),
+    );
+    assert.throws(() => namedOnly.requirements(selection), /baseUrl/);
+    assert.throws(
+      () => adapter.requirements({ ...selection, provider: 'missing' }),
+      /Provider "missing" is not configured for OpenCode; configured providers: openai-compatible, openrouter, gateway-direct, claude\./,
+    );
+    assert.throws(
+      () => adapter.requirements({ ...selection, provider: 'claude' }),
+      /Provider "claude" uses the anthropic integration, which OpenCode does not support; it requires openai-compatible\./,
+    );
+    for (const bad of [
+      { 'Bad Name': providers.openrouter },
+      { 'openai-compatible': providers.openrouter },
+      { x: { integration: 'openai-compatible' as const } },
+      {
+        x: { integration: 'openai-compatible' as const, baseUrl: 'ftp://bad' },
+      },
+    ])
+      assert.throws(() => createOpenCodeAdapter({ providers: bad }));
+  });
+
   it('declares only explicit Chat Completions routing, isolated state, and its credential', () => {
     const adapter = createOpenCodeAdapter({
       baseUrl: 'https://gateway.example/v1',
@@ -185,11 +251,11 @@ describe('OpenCode adapter', () => {
       );
     assert.throws(
       () => adapter.requirements({ ...selection, provider: 'openai' }),
-      /openai-compatible/,
+      /Provider "openai" is not configured for OpenCode; configured providers: openai-compatible/,
     );
     assert.throws(
       () => adapter.requirements({ ...selection, provider: 'openrouter' }),
-      /openai-compatible/,
+      /Provider "openrouter" is not configured/,
     );
     assert.throws(
       () => createOpenCodeAdapter().requirements(selection),

@@ -7,12 +7,19 @@ import { parseArgs } from 'node:util';
 import { createClaudeCodeAdapter } from './agents/claude-code/index.ts';
 import { createCodexAdapter } from './agents/codex/index.ts';
 import { createOpenCodeAdapter } from './agents/opencode/index.ts';
+import {
+  OPENCODE_PROVIDER_NAME,
+  openCodeProviderBaseUrlEnvironment,
+  openCodeProviderCredentialEnvironment,
+  parseOpenCodeProviders,
+} from './agents/opencode/providers.ts';
 import type { ForgeComposition } from './contracts/composition.ts';
 import {
   type CredentialResolver,
   createEnvironmentCredentialResolver,
 } from './contracts/credentials.ts';
 import { createDirectoryRunInputProvider } from './contracts/inputs.ts';
+import { ProviderConfigurationError } from './contracts/providers.ts';
 import type { RuntimePlatform } from './contracts/runtime.ts';
 import { CredentialReferenceConflictError } from './credentialDeclarations.ts';
 import { defaultForgeEngine, type ForgeEngine } from './engine.ts';
@@ -239,6 +246,7 @@ export async function createDefaultCliComposition(
   const opencodeBaseUrl = environment.OPENCODE_BASE_URL;
   const opencode = createOpenCodeAdapter({
     ...(opencodeBaseUrl === undefined ? {} : { baseUrl: opencodeBaseUrl }),
+    providers: parseOpenCodeProviders(environment),
   });
   const credentialResolver =
     options.credentialResolver ??
@@ -802,8 +810,12 @@ function expandCredentialEnvironmentBindings(
   // Only actual selected declarations receive grants. Runtime uses include
   // custom setup actions; references reused by other purposes gain no access.
   for (const use of uses) {
+    // Named OpenCode providers are granted by their own host variable; the
+    // runtime slot (use.environmentName) stays OPENCODE_API_KEY.
     const name =
-      use.environmentName ?? CLI_CREDENTIAL_ENVIRONMENTS.get(use.reference);
+      openCodeProviderCredentialEnvironment(use.reference) ??
+      use.environmentName ??
+      cliCredentialEnvironment(use.reference);
     if (name !== undefined && grants.environmentNames.includes(name)) {
       if (
         Object.hasOwn(grants.references, use.reference) &&
@@ -900,9 +912,16 @@ function createCliCredentialBindingSession(
   };
 }
 
-function credentialEnvironmentName(reference: string): string | undefined {
+function cliCredentialEnvironment(reference: string): string | undefined {
   return (
     CLI_CREDENTIAL_ENVIRONMENTS.get(reference) ??
+    openCodeProviderCredentialEnvironment(reference)
+  );
+}
+
+function credentialEnvironmentName(reference: string): string | undefined {
+  return (
+    cliCredentialEnvironment(reference) ??
     (/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(reference)
       ? reference.slice(4)
       : undefined)
@@ -976,8 +995,9 @@ function createCliCredentialResolver(
       const [reference, context] = args;
       context.signal.throwIfAborted();
       const shorthand =
+        openCodeProviderCredentialEnvironment(reference) ??
         /^forge-eval:([A-Za-z_][A-Za-z0-9_]*)$/.exec(context.purpose)?.[1] ??
-        CLI_CREDENTIAL_ENVIRONMENTS.get(reference);
+        cliCredentialEnvironment(reference);
       const name = shorthand ?? credentialEnvironmentName(reference);
       const binding = Object.hasOwn(bindings, reference)
         ? { source: bindings[reference]!, resolver }
@@ -1010,6 +1030,12 @@ function credentialDiagnostic(
   while (error instanceof Error && !seen.has(error)) {
     seen.add(error);
     if (error instanceof CliCredentialError) return error.message;
+    if (error instanceof ProviderConfigurationError)
+      return error.reason === 'unknown_provider' &&
+        error.adapter === 'OpenCode' &&
+        OPENCODE_PROVIDER_NAME.test(error.provider)
+        ? `${error.message} OpenCode providers are configured with ${openCodeProviderBaseUrlEnvironment(error.provider)}.`
+        : error.message;
     if (
       error instanceof ForgeExecutionError &&
       (error.code === 'invalid_plan' || error.code === 'credential_failed') &&
