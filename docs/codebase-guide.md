@@ -49,7 +49,14 @@ bytes are not rewritten.
 documentation validation, and package checks. PRs targeting `main`, including drafts, run the
 same checks through the [PR workflow](https://github.com/stripe/forge/blob/main/.github/workflows/pr-checks.yml).
 The publishing workflow checks and publishes versioned development snapshots
-after pushes to `main`; stable release commits are skipped.
+to GitHub Packages under the `dev` tag after pushes to `main`. A stable
+`package.json` version starts snapshots of the next patch: `1.0.0` produces
+`1.0.1-dev.X`. An explicit development base such as `1.1.0-dev.0` produces
+`1.1.0-dev.X`. `X` is the workflow run number, which can have gaps; the version
+change happens only in the workflow checkout and is not committed back to
+`main`. Unsupported version formats fail before publication. This workflow
+does not publish stable packages or change the `latest` tag. Consumers must
+update their exact dependency pins to use a newer snapshot.
 
 `pnpm check:docs` checks documentation links, the public export inventory, and
 structured snippets. `pnpm check:cases` validates checked-in datasets and

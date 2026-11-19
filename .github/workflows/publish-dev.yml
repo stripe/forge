@@ -35,29 +35,15 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Set snapshot version
-        id: snapshot
         run: |
           BASE_VERSION="$(node -p "require('./package.json').version")"
-          case "${BASE_VERSION}" in
-            *-dev.0) ;;
-            *)
-              if [[ "${BASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "publish=false" >> "${GITHUB_OUTPUT}"
-                exit 0
-              fi
-              echo "Expected package version to end in -dev.0, found ${BASE_VERSION}" >&2
-              exit 1
-              ;;
-          esac
-          npm version "${BASE_VERSION%.0}.${GITHUB_RUN_NUMBER}" --no-git-tag-version
-          echo "publish=true" >> "${GITHUB_OUTPUT}"
+          SNAPSHOT_VERSION="$(node scripts/snapshot-version.mjs "${BASE_VERSION}" "${GITHUB_RUN_NUMBER}")"
+          npm version "${SNAPSHOT_VERSION}" --no-git-tag-version
 
       - name: Check package
-        if: steps.snapshot.outputs.publish == 'true'
         run: pnpm check
 
       - name: Publish snapshot
-        if: steps.snapshot.outputs.publish == 'true'
         run: npm publish --tag dev
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
