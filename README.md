@@ -124,8 +124,12 @@ scores were.
   the needs are met or the turn limit is reached.
 - **Judge.** A model that grades each criterion on its own against the
   transcript and the workspace text (see [what the judge sees](#what-the-judge-sees)),
-  then returns pass or fail with an explanation. Ava and the judge use host-side models chosen separately from
-  the coding agent.
+  then returns pass or fail with an explanation. An experiment can instead
+  select [verbalized sampling](docs/architecture.md#verbalized-sampling-judging),
+  where the judge writes several candidate answers per criterion and Forge
+  aggregates them; setup is in the
+  [reference](docs/reference.md#requirements--credentials). Ava and the judge
+  use host-side models chosen separately from the coding agent.
 
 ## What a result looks like
 
