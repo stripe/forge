@@ -21,7 +21,7 @@ run.
 
 ## Development and verification
 
-Development uses Node.js 22.12 or newer and the pinned package manager:
+Development uses Node.js 22.13 or newer and the pinned package manager:
 
 ```sh
 corepack enable

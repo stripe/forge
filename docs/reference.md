@@ -719,7 +719,7 @@ report, and the command exits with status 1. Library hosts can call
 
 ## Development
 
-Development requires Node.js 22.12 or newer. From a source checkout with
+Development requires Node.js 22.13 or newer. From a source checkout with
 dependencies installed, run tests, type-check, and run Biome:
 
 ```sh
