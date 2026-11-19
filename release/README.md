@@ -32,7 +32,7 @@ The [baseline experiment](experiment.yaml) uses
 `dataset.path: ./datasets/stripe-integration-public-evals` and pins the
 dataset ID and version. Copy `release/` to run it elsewhere without rewriting
 configuration. It selects this case once with Claude Code and Sonnet 4.6,
-using the [default host models](../README.md#requirements--credentials)
+using the [default host models](../docs/reference.md#requirements--credentials)
 for Ava and judging. Override either with `models.role_player` or `models.judge`
 in the experiment. Runtime and model choices belong to the experiment rather
 than the dataset.

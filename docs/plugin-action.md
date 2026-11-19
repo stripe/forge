@@ -129,7 +129,7 @@ the bundled URL. The adapter combines this fragment with the model definition
 from the experiment's agent `model_profile` and restores it before every turn,
 including resume. A workspace `opencode.json` is ignored; model declarations
 belong to the agent selection, and skills/MCP come from `forge/plugin`. See the
-[OpenCode setup](../README.md#opencode-setup) for a baseline/plugin comparison.
+[OpenCode setup](reference.md#opencode-setup) for a baseline/plugin comparison.
 
 OpenCode receipts use `installation: opencode-bundle` instead of
 `native_plugin_id`. They retain the selected catalog identity and commit, record
@@ -244,8 +244,8 @@ values fail before runtime allocation, without fallback to another variable.
 Account or merchant provisioning remains external to Forge.
 Embedding hosts resolve the opaque reference `env:STRIPE_API_KEY` through their
 credential resolver. Ordinary validation and planning need neither grants nor
-secret values. See the README for other
-[credential grants](../README.md#requirements--credentials).
+secret values. See the reference for other
+[credential grants](reference.md#requirements--credentials).
 
 Forge keeps the bundled URL and unrelated plugin content. Claude and OpenCode use
 Authorization header templates in the plugin's MCP configuration. Codex

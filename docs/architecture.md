@@ -1,7 +1,7 @@
 # Forge architecture
 
 This document describes the implemented architecture of Forge. It is a
-conceptual companion to the user-facing [README](../README.md): the README
+conceptual companion to the user-facing [reference](reference.md): the reference
 explains installation, consuming published dataset releases, execution, and
 results. This document explains the data model, boundaries, control flow, trust
 model, and extension points behind Forge's audit records.
@@ -356,8 +356,8 @@ fails. Reporting errors surface on normal completion; after cancellation or
 coordinator failure, reporting is best effort and preserves the primary error.
 Resume does not read the report, so it can regenerate a missing or corrupt
 scorecard without rerunning valid completed evaluations. Report fields and
-denominators are documented in the README's
-[results and scores](../README.md#results-and-scores).
+denominators are documented in the reference's
+[results and scores](reference.md#results-and-scores).
 
 Embedding hosts supply resolved plans, an engine, a pure preflight composition,
 and an execution callback. The callback may construct per-run host resources
@@ -366,8 +366,8 @@ finishing cleanup before settling. The host retains input loading, command
 grammar, publication, and evaluation exit policy. The shared
 controller requires verified local artifacts below its selected root; it is
 not a remote worker protocol. It does not alter `executeEval` or its scoring
-semantics. See the README's
-[experiment run workflow](../README.md#running-experiments).
+semantics. See the reference's
+[experiment run workflow](reference.md#running-experiments).
 
 The command stage exposed through `@stripe/forge/experiment/cli` composes shared
 operational options with host-defined arguments, validates invocation rules,
@@ -408,8 +408,8 @@ produces a deeply frozen `ResolvedRunPlanV1`. It:
 
 Unused host models are omitted from the plan. Used models are cloned and
 frozen in the plan before provider preflight or credential lookup; runtime
-execution and saved-plan parsing never infer a missing model. See the README
-for [model overrides and credentials](../README.md#requirements--credentials).
+execution and saved-plan parsing never infer a missing model. See the reference
+for [model overrides and credentials](reference.md#requirements--credentials).
 
 Plans use canonical JSON with recursively sorted object keys and retained array
 order. The `plan.json` artifact descriptor binds these bytes to `result.json`.
@@ -578,8 +578,8 @@ copied wholesale.
 `forge/credentials` maps each declared runtime name to the opaque reference
 `env:NAME`. That prefix is a host convention, not an implicit core lookup.
 The public CLI requires explicit grants, with missing grants or values failing
-before allocation. See the README's [credential grants](../README.md#requirements--credentials)
-for normal usage and [advanced bindings](../README.md#advanced-credential-bindings)
+before allocation. See the reference's [credential grants](reference.md#requirements--credentials)
+for normal usage and [advanced bindings](reference.md#advanced-credential-bindings)
 for selecting different host variables.
 
 Completion-provider credentials use a separate path. They are resolved per
@@ -985,7 +985,7 @@ for source selection, authentication, supported bundle behavior, and installatio
 receipts. `createOpenCodeAdapter` accepts explicit `baseUrl`, `credential`, `id`,
 `executable`, `expectedVersion`, and logical `layout`
 options; the CLI supplies its endpoint and credential binding as documented
-in the [README](../README.md#opencode-setup).
+in the [reference](reference.md#opencode-setup).
 
 The Codex stream parser accepts the pinned CLI's exact missing-model-metadata
 advisory for the selected model after `thread.started` and before `turn.started`.
@@ -1119,8 +1119,8 @@ parameters may reject the request. OpenAI omits it for GPT-5-and-later
 and o-series identifiers.
 Provider-specific output budgets account for reasoning tokens without changing
 Ava or judge validation. Compatible endpoints and credentials are explicit host
-configuration; neither enters plans or results. See the README's
-[credentials](../README.md#requirements--credentials) for CLI bindings.
+configuration; neither enters plans or results. See the reference's
+[credentials](reference.md#requirements--credentials) for CLI bindings.
 The Anthropic provider supports Claude Haiku, Sonnet, and Opus 4.5 or newer.
 Its pure requirements validation explicitly rejects Claude Fable as a judge
 or Ava model before credentials or requests; coding-agent selection is separate.
@@ -1761,8 +1761,8 @@ against the per-classification counts, then verifies summary and
 case/configuration scores against the run rows. Aggregates use only the latest
 completed effective outcome per selection. Disjoint `criteria_by_requirement`
 groups preserve MUST failures, SHOULD failures, and OPTIONAL telemetry.
-The README defines the
-[score formulas and aggregate denominators](../README.md#understand-scores).
+The reference defines the
+[score formulas and aggregate denominators](reference.md#understand-scores).
 
 | Situation | Status | Score |
 | --- | --- | --- |

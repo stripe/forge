@@ -21,7 +21,7 @@ run.
 
 ## Development and verification
 
-Development uses Node.js 22.12 or newer and the pinned package manager:
+Development uses Node.js 22.13 or newer and the pinned package manager:
 
 ```sh
 corepack enable
@@ -29,8 +29,8 @@ pnpm install --frozen-lockfile
 pnpm build
 ```
 
-Use `node dist/cli.js` to run the built CLI with the README's
-[sample walkthrough](../README.md#run-your-first-experiment). `pnpm test` runs
+Use `node dist/cli.js` to run the built CLI with the reference's
+[sample walkthrough](reference.md#run-your-first-experiment). `pnpm test` runs
 Vitest directly against TypeScript sources; it does not build the package or
 typecheck tests. Use `pnpm typecheck` for type checking. Run the narrowest
 relevant tests while iterating, or use `pnpm test:watch` for watch mode:
@@ -141,8 +141,8 @@ Verify connectivity from a container: a successful host-side request does not
 establish that the container can resolve or reach the bridge.
 
 This is test-suite behavior: the public CLI creates no bridge and requires
-endpoints reachable from the container. See the README's
-[endpoint configuration](../README.md#requirements--credentials).
+endpoints reachable from the container. See the reference's
+[endpoint configuration](reference.md#requirements--credentials).
 
 Results default to `results/live`. `FORGE_LIVE_RUN_ID` sets the suite/run ID
 prefix; `FORGE_LIVE_RESULTS_ROOT` changes the root; `FORGE_LIVE_TIMEOUT_MS` sets
@@ -952,7 +952,7 @@ Treat these changes as cross-cutting and score-affecting. Review together:
 - `evaluation/criterionJudge.ts` prompt behavior;
 - result wire schemas and conditional artifacts;
 - `results/localStore.ts` verification; and
-- README/architecture documentation and end-to-end tests.
+- reference/architecture documentation and end-to-end tests.
 
 Changing what the judge sees requires reviewing Forge release compatibility
 and stored-run verification; it is not a local refactor.
@@ -961,7 +961,7 @@ and stored-run verification; it is not a local refactor.
 
 Update the producer in `execution/execute.ts`, types and parser in `results`,
 canonical inventory and semantic verification in `results/localStore.ts`, and
-README/architecture inventory. Keep host-owned files below
+reference/architecture inventory. Keep host-owned files below
 `extensions/<contributor-id>/`; keep agent-native bytes below
 `native/<adapter-id>/` and restricted.
 
