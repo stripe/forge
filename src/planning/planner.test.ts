@@ -4,9 +4,11 @@ import { OPEN_CODE_MODEL_PROFILE } from '../../test/support/opencode.ts';
 
 import { sha256Digest } from '../model/hashes.ts';
 import { getMatrixGroups } from '../model/matrix.ts';
+import { parseExperimentConfig, parseResolvedRunPlan } from '../model/parse.ts';
 import type {
   EvalCaseV1,
   ExperimentConfigV1,
+  JudgeModelRefV1,
   LoadedDatasetV1,
   LoadedExperimentConfigV1,
   RunSelection,
@@ -860,6 +862,73 @@ describe('experiment expansion and run planning', () => {
       () => resolveRunPlan({ ...loaded, selection: selected }),
       /requires a concrete runtimePlatform/,
     );
+  });
+
+  it('plans the judge method; a judge without one keeps its plan identity', () => {
+    const planFor = (judge: JudgeModelRefV1) => {
+      const loaded = inputs({
+        experiment: experimentConfig({ models: { judge } }),
+      });
+      return resolveRunPlan({
+        ...loaded,
+        selection: expandExperiment(loaded.experiment, loaded.dataset)[0]!,
+      });
+    };
+    const base = { provider: 'openai', model: 'gpt-6.1-sol' };
+    assert.deepEqual(planFor(base).evaluation.judge, base);
+    assert.deepEqual(
+      planFor({ ...base, mode: 'verbalized-sampling' }).evaluation.judge,
+      { ...base, mode: 'verbalized-sampling', candidates: 5 },
+    );
+    assert.deepEqual(
+      planFor({ ...base, mode: 'verbalized-sampling', candidates: 3 })
+        .evaluation.judge,
+      { ...base, mode: 'verbalized-sampling', candidates: 3 },
+    );
+    const sampled = planFor({ ...base, mode: 'verbalized-sampling' });
+    assert.deepEqual(parseResolvedRunPlan(sampled), sampled);
+    assert.ok(Object.isFrozen(sampled.evaluation.judge));
+    assert.notEqual(
+      resolvedRunPlanSha256(sampled),
+      resolvedRunPlanSha256(planFor(base)),
+    );
+    assert.notEqual(
+      resolvedRunPlanSha256(
+        planFor({ ...base, mode: 'verbalized-sampling', candidates: 3 }),
+      ),
+      resolvedRunPlanSha256(sampled),
+    );
+  });
+
+  it('rejects judge candidates without verbalized sampling and unknown modes', () => {
+    const base = { provider: 'openai', model: 'gpt-6.1-sol' };
+    const loaded = inputs();
+    const plan = resolveRunPlan({
+      ...loaded,
+      selection: expandExperiment(loaded.experiment, loaded.dataset)[0]!,
+    });
+    for (const judge of [
+      { ...base, candidates: 3 },
+      { ...base, mode: 'explained' },
+      { ...base, mode: 'sampled' },
+      { ...base, mode: 'verbalized-sampling', candidates: 11 },
+      { ...base, mode: 'verbalized-sampling', candidates: 1 },
+      { ...base, mode: 'verbalized-sampling', candidates: 2.5 },
+      { ...base, mode: 'verbalized-sampling', candidates: null },
+      { ...base, mode: 'verbalized-sampling', extra: true },
+    ]) {
+      assert.throws(() =>
+        parseExperimentConfig(
+          experimentConfig({ models: { judge: judge as JudgeModelRefV1 } }),
+        ),
+      );
+      assert.throws(() =>
+        parseResolvedRunPlan({
+          ...plan,
+          evaluation: { ...plan.evaluation, judge },
+        }),
+      );
+    }
   });
 
   it('defaults omitted host models to Sol without changing authored inputs', () => {

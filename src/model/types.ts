@@ -198,6 +198,28 @@ export interface ModelRefV1 {
   model: string;
 }
 
+/**
+ * A judge model plus how it answers. Absent `mode` keeps the default
+ * pass/fail judge; `candidates` is set only for `verbalized-sampling`.
+ */
+export interface JudgeModelRefV1 extends ModelRefV1 {
+  mode?: import('./judgeMethod.ts').DecisionJudgeMode;
+  candidates?: number;
+}
+
+/**
+ * A judge in a resolved plan: the default judge names no method, and a
+ * `verbalized-sampling` judge carries its materialized candidate count.
+ */
+export type ResolvedJudgeModelRefV1 = ModelRefV1 &
+  (
+    | { mode?: never; candidates?: never }
+    | {
+        mode: import('./judgeMethod.ts').DecisionJudgeMode;
+        candidates: number;
+      }
+  );
+
 export interface AgentSelectionV1 extends ModelRefV1 {
   adapter: string;
   /** Codex hook review: native by default; automation permits all enabled hooks. */
@@ -302,7 +324,7 @@ export interface ExperimentConfigV1 {
   runtime: ForgeRuntimeConfigV1;
   models: {
     role_player?: ModelRefV1;
-    judge?: ModelRefV1;
+    judge?: JudgeModelRefV1;
   };
   treatments: Record<TreatmentId, TreatmentV1>;
   matrix: ExperimentMatrixV1;
@@ -380,7 +402,7 @@ export interface ResolvedRunPlanV1 {
     judging_criteria: JudgingCriterionV1[];
     checks?: ChecksV1;
     example_answer?: string;
-    judge?: ModelRefV1;
+    judge?: ResolvedJudgeModelRefV1;
   };
   role_player?: ModelRefV1;
   agent: AgentSelectionV1;

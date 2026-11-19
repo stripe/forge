@@ -8,6 +8,8 @@ import type {
   AgentAdapterMetadata,
   CompletionProviderMetadata,
 } from '../contracts/metadata.ts';
+import type { CriterionDecisionV1 } from '../evaluation/criterionDecision.ts';
+import type { DecisionRejectionReason } from '../evaluation/decision.ts';
 import type {
   JUDGE_TRANSCRIPT_COPIED_CONTEXT,
   JUDGE_TRANSCRIPT_INCLUDED_FIELDS,
@@ -29,6 +31,8 @@ import type {
 } from '../model/types.ts';
 import type { ForgeBuildIdentity } from '../version.ts';
 
+/** The largest `result.json` the store writes or reads. */
+export const MAX_RESULT_BYTES = 1024 * 1024;
 export const MAX_SETUP_ARTIFACT_BYTES = 2 * 1024 * 1024;
 
 /** Producer release for a companion artifact interpreted by this package. */
@@ -67,18 +71,34 @@ export interface CheckResultV1 {
   readonly tool_calls?: ToolCallCheckEvidenceV1;
 }
 
+export interface CriterionEvidenceWarningV1 {
+  readonly source: 'trajectory' | 'workspace';
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+}
+
 export type CriterionResultV1 = {
   readonly label?: string;
   /** Always present after parsing; omitted input defaults to SHOULD. */
   readonly requirement_level: RequirementLevelV1;
   readonly criterion: string;
   readonly explanation: string;
+  /** Set when the judge ran with an evaluation-level capture-status record. */
+  readonly evidence_warnings_ref?: 'evaluation';
 } & (
-  | { readonly passed: boolean; readonly error?: never }
+  | {
+      readonly passed: boolean;
+      /** Present when a judge method recorded the choice behind `passed`. */
+      readonly decision?: CriterionDecisionV1 | undefined;
+      readonly error?: never;
+    }
   | {
       readonly passed: null;
+      readonly decision?: never;
       readonly error: {
         readonly type: 'parse_error' | 'request_error';
+        readonly reason?: DecisionRejectionReason | undefined;
         readonly attempts: number;
         /** Bounded diagnostic; request messages redact resolved credentials. */
         readonly message: string;
@@ -95,6 +115,7 @@ export interface EvaluationResultV1 {
   readonly judging_criteria_errored: number;
   readonly judging_criteria: readonly CriterionResultV1[];
   readonly checks: readonly CheckResultV1[];
+  readonly evidence_warnings?: readonly CriterionEvidenceWarningV1[];
 }
 
 export interface WorkspaceEvidenceEntryV1 {

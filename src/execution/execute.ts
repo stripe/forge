@@ -57,6 +57,7 @@ import {
   resolveCredentialDeclarations,
   validateCredentialDeclarations,
 } from '../credentialDeclarations.ts';
+import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   type CriterionCompletionRequest,
   collectJudgeWorkspaceEvidence,
@@ -67,6 +68,7 @@ import {
 import { sizeJudgePrompt } from '../evaluation/judgeEvidenceBudget.ts';
 import { boundJudgeWorkspaceEvidence } from '../evaluation/judgeWorkspace.ts';
 import { resolveJudgeTranscript } from '../evaluation/resolveJudgeTranscript.ts';
+import { samplingResultBudgetIssue } from '../evaluation/samplingResultBudget.ts';
 import {
   createDriverFallbackEvidence,
   parseAgentEvidenceIdentity,
@@ -92,6 +94,7 @@ import {
   type JsonValue,
   type ResolvedRunPlanV1,
 } from '../model/index.ts';
+import { judgeMethodOf } from '../model/judgeMethod.ts';
 import { parseResolvedRunPlanWithSetupActions } from '../model/parse.ts';
 import { serializeResolvedRunPlan } from '../planning/index.ts';
 import {
@@ -538,6 +541,9 @@ export async function executeEvalWithTestHooks(
         | Awaited<ReturnType<typeof judgeCriteria>>
         | undefined;
       let judgeEvidence: JudgeEvidenceV1 | undefined;
+      let evidenceWarnings:
+        | ReturnType<typeof criterionEvidenceWarnings>
+        | undefined;
       const safeWorkspace =
         criteria.length === 0
           ? undefined
@@ -610,10 +616,18 @@ export async function executeEvalWithTestHooks(
       if (resolved !== undefined && prompt !== undefined) {
         const judgeTranscript = resolved.transcript;
         const safeWorkspaceText = prompt.workspaceText;
+        const judgeMethod = judgeMethodOf(input.plan.evaluation.judge!);
+        // Only a method judge shows the capture status and records it.
+        if (judgeMethod !== undefined)
+          evidenceWarnings = criterionEvidenceWarnings({
+            trajectory: redacted.evidence,
+            workspace: safeWorkspace!,
+          });
         criterionResults = await judgeCriteria(
           {
             transcript: judgeTranscript,
             criteria,
+            ...(evidenceWarnings === undefined ? {} : { evidenceWarnings }),
             ...(input.plan.evaluation.example_answer === undefined
               ? {}
               : { exampleAnswer: input.plan.evaluation.example_answer }),
@@ -634,6 +648,7 @@ export async function executeEvalWithTestHooks(
           },
           {
             ...retryOptions,
+            ...(judgeMethod === undefined ? {} : { judgeMethod }),
             redactionSecrets: secrets,
             onRetryDecision: completions.recordRetryDecision,
             validateRequest: (request) =>
@@ -677,6 +692,7 @@ export async function executeEvalWithTestHooks(
         trajectory: redacted.evidence.trajectory,
         workspace: sealed!.workspace,
         ...(criterionResults === undefined ? {} : { criterionResults }),
+        ...(evidenceWarnings === undefined ? {} : { evidenceWarnings }),
         signal,
       });
       return { ...result, judgeEvidence, redacted };
@@ -1207,6 +1223,15 @@ function assertExecutablePlan(plan: ResolvedRunPlanV1): void {
   }
   // Defensive JSON/canonicalization check before any credential or runtime use.
   serializeResolvedRunPlan(plan);
+  const judge = plan.evaluation.judge;
+  if (judge?.candidates !== undefined) {
+    const issue = samplingResultBudgetIssue(
+      plan.evaluation.judging_criteria.length,
+      judge.candidates,
+    );
+    if (issue !== undefined)
+      throw new ForgeExecutionError('invalid_plan', 'preflight', issue);
+  }
 }
 
 function preflightRuntime(

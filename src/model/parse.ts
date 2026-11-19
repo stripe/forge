@@ -12,6 +12,12 @@ import {
 import { JudgingCriterionSchema } from './criteria.ts';
 import { BenchmarkModelError, type BenchmarkModelErrorCode } from './errors.ts';
 import { isSha256Digest } from './hashes.ts';
+import {
+  DECISION_JUDGE_MODES,
+  type DecisionJudgeMode,
+  MAX_VERBALIZED_SAMPLING_CANDIDATES,
+  MIN_VERBALIZED_SAMPLING_CANDIDATES,
+} from './judgeMethod.ts';
 import { agentSelectionKey } from './matrix.ts';
 import {
   isAuthoredCaseId,
@@ -415,6 +421,37 @@ export const ModelProfileSchema = z
   })
   .strict();
 
+const JudgeModelRefFields = ModelRefSchema.extend({
+  mode: z
+    .enum(DECISION_JUDGE_MODES as [DecisionJudgeMode, ...DecisionJudgeMode[]])
+    .optional(),
+  candidates: z
+    .number()
+    .int()
+    .min(MIN_VERBALIZED_SAMPLING_CANDIDATES)
+    .max(MAX_VERBALIZED_SAMPLING_CANDIDATES)
+    .optional(),
+}).strict();
+
+/** An authored judge reference; `candidates` only accompanies a mode. */
+const JudgeModelRefSchema = JudgeModelRefFields.refine(
+  (judge) =>
+    judge.candidates === undefined || judge.mode === 'verbalized-sampling',
+  {
+    message: 'Judge candidates apply only to verbalized-sampling.',
+    path: ['candidates'],
+  },
+);
+
+/** A resolved judge reference: a mode comes with its materialized count. */
+const ResolvedJudgeModelRefSchema = JudgeModelRefSchema.refine(
+  (judge) => judge.mode === undefined || judge.candidates !== undefined,
+  {
+    message: 'A resolved judge mode requires its candidates.',
+    path: ['candidates'],
+  },
+);
+
 const AgentSelectionSchema = ModelRefSchema.extend({
   adapter: SimpleIdentifierSchema,
   hook_trust: z.enum(['native', 'automation']).optional(),
@@ -632,7 +669,7 @@ const ExperimentConfigSchema = z
     models: z
       .object({
         role_player: ModelRefSchema.optional(),
-        judge: ModelRefSchema.optional(),
+        judge: JudgeModelRefSchema.optional(),
       })
       .strict()
       .prefault({}),
@@ -813,7 +850,7 @@ const ResolvedRunPlanSchema = z
         judging_criteria: JudgingCriteriaSchema,
         checks: ChecksSchema.optional(),
         example_answer: z.string().refine(isBoundedText).optional(),
-        judge: ModelRefSchema.optional(),
+        judge: ResolvedJudgeModelRefSchema.optional(),
       })
       .strict(),
     role_player: ModelRefSchema.optional(),

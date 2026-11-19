@@ -79,6 +79,30 @@ function validPlan(): ResolvedRunPlanV1 {
 }
 
 describe('parseResolvedRunPlan', () => {
+  it('requires a sampling judge to carry its candidate count', () => {
+    const judge = { provider: 'openai', model: 'gpt-test' };
+    const withJudge = (extra: object) => {
+      const plan = validPlan();
+      const criteria = [
+        { value: 'It MUST work.', requirement_level: 'MUST' as const },
+      ];
+      plan.case.judging_criteria = criteria;
+      plan.evaluation = {
+        ...plan.evaluation,
+        judging_criteria: criteria,
+        judge: { ...judge, ...extra },
+      } as typeof plan.evaluation;
+      return plan;
+    };
+    assert.throws(
+      () => parseResolvedRunPlan(withJudge({ mode: 'verbalized-sampling' })),
+      /requires its candidates/,
+    );
+    const sampled = withJudge({ mode: 'verbalized-sampling', candidates: 5 });
+    assert.deepEqual(parseResolvedRunPlan(sampled), sampled);
+    const legacy = withJudge({});
+    assert.deepEqual(parseResolvedRunPlan(legacy), legacy);
+  });
   it('retains historical case identities and filenames in saved artifacts', () => {
     const plan = validPlan();
     const id = 'Legacy_Suite/Case.1';

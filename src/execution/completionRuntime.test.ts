@@ -56,6 +56,19 @@ describe('completion runtime', () => {
     assert.equal(Object.isFrozen(prepared.calls[0]!.provider_metadata), true);
   });
 
+  it('binds the judge provider and model without its method', () => {
+    const scripted = createScriptedCompletionProvider({ id: MODEL.provider });
+    const plan = createTestResolvedRunPlan({
+      judgingCriteria: ['One criterion'],
+      judge: { ...MODEL, mode: 'verbalized-sampling', candidates: 5 },
+    });
+    const [binding] = completionBindingsForPlan(
+      plan,
+      composition(scripted.provider),
+    );
+    assert.deepEqual(binding!.model, MODEL);
+  });
+
   it('rejects malformed provider metadata before resolving credentials', () => {
     const scripted = createScriptedCompletionProvider({ id: MODEL.provider });
     for (const metadata of [

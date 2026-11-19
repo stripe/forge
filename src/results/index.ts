@@ -26,6 +26,7 @@ export {
   type CompletionPurposeV1,
   type CompletionStopReasonV1,
   type CompletionSubattemptRecordV1,
+  type CriterionEvidenceWarningV1,
   type CriterionResultV1,
   type EvalStatus,
   type EvaluationResultV1,

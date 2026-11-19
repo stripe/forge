@@ -8,6 +8,7 @@ import type {
   RunArtifactTransaction,
 } from '../contracts/artifacts.ts';
 import { parseAgentPluginInstallationReceipt } from '../contracts/pluginReceipt.ts';
+import { criterionEvidenceWarnings } from '../evaluation/criterionEvidence.ts';
 import {
   type JudgeEvidenceBudgetSelection,
   selectJudgeEvidence,
@@ -43,12 +44,12 @@ import {
   type ArtifactDescriptorV1,
   type CompletedRun,
   type InteractionArtifactV1,
+  MAX_RESULT_BYTES,
   MAX_SETUP_ARTIFACT_BYTES,
   type RunResult,
 } from './types.ts';
 
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const MAX_RESULT_BYTES = 1024 * 1024;
 const VERIFIED_ARTIFACT_PATHS = new Set([
   'interaction.json',
   'judge-evidence.json',
@@ -675,6 +676,37 @@ function verifyJudgeEvidence(
   const judgeEvidence = parseJsonArtifact(path, body, (value) =>
     parseJudgeEvidence(value, { forgeVersion: result.forge.version }),
   );
+  const warnings = criterionEvidenceWarnings({
+    trajectory: result.evidence,
+    workspace: judgeEvidence.workspace,
+  });
+  if (plan.evaluation.judge?.mode !== undefined) {
+    // A method judge records its decisions and the capture status it saw.
+    for (const criterion of result.evaluation.judging_criteria) {
+      if (
+        criterion.evidence_warnings_ref !== 'evaluation' ||
+        (criterion.passed !== null && criterion.decision === undefined)
+      ) {
+        throw new ArtifactStoreError(
+          'Sampling-judged criteria must keep their decision and evidence warning reference.',
+        );
+      }
+    }
+    if (result.evaluation.evidence_warnings === undefined) {
+      throw new ArtifactStoreError(
+        'Sampling-judged results must keep their evidence warnings.',
+      );
+    }
+  }
+  if (
+    result.evaluation.evidence_warnings !== undefined &&
+    serializeCanonicalJson(result.evaluation.evidence_warnings) !==
+      serializeCanonicalJson(warnings)
+  ) {
+    throw new ArtifactStoreError(
+      'Evaluation evidence warnings do not match the saved evidence.',
+    );
+  }
   if (judgeEvidence.transcript.omitted !== undefined) {
     let budget: JudgeEvidenceBudgetSelection;
     try {

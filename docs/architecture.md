@@ -1675,6 +1675,60 @@ options to ensure final defensive redaction cannot change the already-audited
 evidence. This validation runs outside the retryable provider call; failure
 cancels peer judgments and prevents commit.
 
+#### Verbalized-sampling judging
+
+`models.judge.mode: verbalized-sampling` (with optional `candidates`, 2–10,
+default 5) selects a judge that replaces the pass/fail judgment with sampled
+Choice answers. The plan saves the mode and the materialized count; a judge
+without a mode keeps its plan identity and its request byte for byte.
+Completion providers still bind only the provider and model.
+
+Each criterion's request asks, in one reply, for exactly `candidates` candidate
+answers. A candidate has a `reading`, a `rationale`, a `label` (`met`, `not_met`,
+or `insufficient_evidence`), and a `probability` weight in [0, 1]. The parser
+accepts 1–10 candidates, text up to 4,096 characters, and a positive total
+weight, which need not be one. A label's probability is the sum of its
+candidates' weights divided by the total, renormalized once to sum to one.
+Confidence is the largest aggregate probability unless the reply states it.
+
+The choice is the maximum. A stated choice must be within 1e-6 of the maximum.
+With no stated choice, labels within 1e-6 of the maximum are tied, and the tie
+resolves only when the most probable candidate (within 1e-6) names exactly one
+tied label; otherwise the reply is rejected with `choice_not_argmax`. A
+criterion passes exactly when the choice is `met`. Its saved `decision` holds
+the distribution, choice, candidates, and a `thresholded_outcome` annotation
+(`insufficient_evidence` unless a non-abstaining choice has probability at least
+0.80); the annotation never changes `passed`. The explanation is the most
+probable candidate's rationale, the first among equals, unless the reply states
+one.
+
+The request uses a 4,096-token output budget, a strict candidate schema, and no
+temperature. A rejected reply is a parse failure on the shared short-retry
+schedule. Exhaustion saves `passed: null`, a `parse_error` with a fixed `reason`
+(for example `unknown_key` or `choice_not_argmax`), and no reply text; the
+criterion is excluded from the score denominator as any judge error is.
+
+Candidates are saved whole in `result.json`, which the store caps at 1 MiB.
+Preflight rejects a plan whose criteria × candidates × the largest saved
+candidate record (two 4,096-character texts plus fixed fields, counted one byte
+per character) exceed that cap less a 64 KiB reserve, before any credential
+lookup or judge request. The estimate rejects configurations that cannot fit;
+it is not an upper bound. Multi-byte text, JSON escaping and per-criterion
+explanations can still make a result exceed the cap, which fails the run at
+commit, the same limit and behavior as the implementation the published results
+used. Candidates are never truncated.
+
+The prompt differs from the pass/fail prompt in three places: it asks the judge
+to "choose met", it states the trajectory capture status in one fixed sentence
+(complete; partial or fallback; native evidence unavailable; or unknown), and it
+appends the sampling instructions and the typed question. Warning messages and
+paths are never shown. The evaluation saves the warnings it derived from the
+run's evidence as `evaluation.evidence_warnings`, bounded to 64 records and 16
+KiB with an explicit marker, and each criterion refers to them with
+`evidence_warnings_ref`. The local store verifies the list against the saved
+evidence. Whole-prompt sizing reserves the sampling wrapper and the longest
+capture-status line, so a verified run recomputes the same evidence choice.
+
 ### Score and status
 
 The numeric score is passes divided by valid MUST and SHOULD judgments, with

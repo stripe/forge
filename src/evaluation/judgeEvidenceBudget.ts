@@ -1,3 +1,4 @@
+import { judgeMethodOf } from '../model/judgeMethod.ts';
 import type { ResolvedRunPlanV1 } from '../model/types.ts';
 import type { JudgeEvidenceV1 } from '../results/types.ts';
 import {
@@ -19,6 +20,9 @@ export function sizeJudgePrompt(
       criteria: plan.evaluation.judging_criteria,
       exampleAnswer: plan.evaluation.example_answer,
       workspaceText,
+      ...(plan.evaluation.judge === undefined
+        ? {}
+        : { method: judgeMethodOf(plan.evaluation.judge) }),
     }),
   };
 }

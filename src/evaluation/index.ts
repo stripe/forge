@@ -1,4 +1,10 @@
 export {
+  DECISION_JUDGE_MODES,
+  type DecisionJudgeMethod,
+  type DecisionJudgeMode,
+  decisionJudgeMethod,
+} from '../model/judgeMethod.ts';
+export {
   collectWorkspaceEvidence,
   type EvaluatedRunEvidence,
   type EvaluateRunEvidenceInput,
@@ -7,6 +13,15 @@ export {
   runWorkspaceChecks,
   UnsupportedEvaluationCapabilityError,
 } from './checks.ts';
+export {
+  CRITERION_DECISION_CRITERIA,
+  CRITERION_DECISION_OPTIONS,
+  CRITERION_DECISION_THRESHOLDS,
+  type CriterionDecisionOption,
+  type CriterionDecisionThresholdsV1,
+  type CriterionDecisionV1,
+  criterionDecisionOutcome,
+} from './criterionDecision.ts';
 export {
   buildCriterionJudgePrompt,
   CRITERION_JUDGE_RETRY_DELAYS_MS,
@@ -22,6 +37,10 @@ export {
   MAX_CRITERION_JUDGE_PROMPT_BYTES,
   parseCriterionJudgment,
 } from './criterionJudge.ts';
+export {
+  DECISION_PROBABILITY_TOLERANCE,
+  type DecisionRejectionReason,
+} from './decision.ts';
 export {
   type JudgeEvidenceBudgetInput,
   type JudgeEvidenceBudgetSelection,
