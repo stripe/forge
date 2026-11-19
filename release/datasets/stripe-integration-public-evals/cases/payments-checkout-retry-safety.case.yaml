@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-checkout-retry-safety
-version: 0.2.0
+version: 1.0.0
 task: |-
   Customers on slow connections sometimes click Pay twice. Make checkout safe to retry without creating two payable purchases for the same order.
 initial_prompt: |-

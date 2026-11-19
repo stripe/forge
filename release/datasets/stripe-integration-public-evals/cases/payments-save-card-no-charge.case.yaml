@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-save-card-no-charge
-version: 0.2.0
+version: 1.0.0
 task: |-
   Add a way for customers to leave a card on file when they book a repair. We shouldn't charge them until the work is done. A fail closed stub resolver is acceptable.
 initial_prompt: |-

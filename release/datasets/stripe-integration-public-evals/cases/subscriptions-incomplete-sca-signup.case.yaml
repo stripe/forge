@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-incomplete-sca-signup
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building a custom Elements signup for a $40/month SaaS plan. The first card payment can require 3D Secure. Create the subscription directly with the Stripe API, complete any customer authentication in the browser, and grant access only after payment succeeds. Use Next.js, TypeScript, and the stripe npm package.
 initial_prompt: |-

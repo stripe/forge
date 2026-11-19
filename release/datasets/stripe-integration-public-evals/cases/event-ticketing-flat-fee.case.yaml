@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/event-ticketing-flat-fee
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building an event-ticketing marketplace. Organizers sell tickets through the platform, and we charge a flat $2 per customer purchase/order, not per individual ticket in the order. Ticket prices range from $10 to $500. Recommend the Accounts v2 configuration and immediate single-organizer payment flow, implement the $2 fee, and assess whether the model remains profitable across the range.
 initial_prompt: |-

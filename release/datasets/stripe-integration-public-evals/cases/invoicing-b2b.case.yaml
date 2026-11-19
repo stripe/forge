@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/invoicing-b2b
-version: 0.1.0
+version: 1.0.0
 task: |-
   I run a B2B software consulting firm. Every month I need to send invoices to clients for work completed. Build an invoicing system using Stripe. Use Node.js/TypeScript and the `stripe` npm package. Requirements: - Create clients (Stripe Customers) with their billing email - Create invoices with multiple line items (e.g., "Backend development: 20hrs @ $200/hr", "Code review: 5hrs @ $150/hr") - Finalize and send invoices to clients by email - Track payment status (paid, outstanding, overdue) - List unpaid invoices for a given client - A webhook endpoint that fires when an invoice is paid or payment fails Assume an Express app already exists.
 initial_prompt: |-

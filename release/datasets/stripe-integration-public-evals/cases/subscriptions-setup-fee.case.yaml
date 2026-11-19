@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-setup-fee
-version: 0.1.0
+version: 1.0.0
 task: |-
   I'm building a managed IT service called "OpsDesk" using Next.js and TypeScript. New customers pay a one-time $299 onboarding fee and then $99/month for support. Both charges should be collected in one Checkout flow, but only the support plan should renew. Build the Stripe integration using the stripe npm package. Requirements: - Start Checkout with the one-time and recurring Prices - Show the onboarding fee and monthly plan as separate line items - Confirm the initial invoice was paid before provisioning - Ensure future invoices contain only the recurring support plan - Handle subscription and payment failures through webhooks Assume Next.js App Router is set up and both Price IDs already exist.
 initial_prompt: |-

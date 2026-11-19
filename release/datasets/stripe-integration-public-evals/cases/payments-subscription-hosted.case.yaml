@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-subscription-hosted
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building a newsletter platform where readers can subscribe to premium content for $12/month. When a reader clicks "Subscribe," they should go through a payment flow. After subscribing, they should be able to manage or cancel their subscription on their own.
 

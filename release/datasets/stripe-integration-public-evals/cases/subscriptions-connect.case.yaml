@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-connect
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building a marketplace called "CoachCloud" using Node.js and TypeScript. Each coach is a Stripe connected account and sells a $50/month membership. The platform owns the membership Price and fan Customer, creates subscription Checkout, transfers recurring proceeds to the coach with destination charges, and keeps a 12% platform fee. Build the Connect subscription integration using the stripe npm package. Requirements: - Create or reuse the fan Customer in the platform account - Create subscription Checkout with the platform-owned recurring Price - Route funds to the connected account and set the platform fee - Set the merchant/on-behalf-of context correctly - Consume webhook events in the account context that produced them - Assume an Express app and connected-account onboarding already exist.
 initial_prompt: |-

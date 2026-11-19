@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-radar-review-fulfillment
-version: 0.2.0
+version: 1.0.0
 task: |-
   Don't ship orders that Stripe flags for manual review. Once our fraud team approves one, let it continue to fulfillment.
 initial_prompt: |-

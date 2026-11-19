@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-send-invoice-net30
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building annual B2B software contracts. Customers should receive a recurring invoice by email and have 30 days to pay by the Hosted Invoice Page instead of being charged automatically. Build subscription creation, invoice tracking, reminders, and access-state synchronization in Node.js/TypeScript with the stripe npm package.
 initial_prompt: |-

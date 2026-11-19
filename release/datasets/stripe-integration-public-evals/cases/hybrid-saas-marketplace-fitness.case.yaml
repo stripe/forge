@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/hybrid-saas-marketplace-fitness
-version: 0.2.0
+version: 1.0.0
 task: |-
   Design Stripe Connect for GymFlow, which has two payment products using the same gym accounts. On the SaaS side, each gym sells memberships and class packages under its own brand as merchant of record. On the marketplace side, consumers book one gym's drop-in class in GymFlow's app and GymFlow keeps 12%. Provide distinct charge patterns, Accounts v2 configurations, capability gating, and fee logic for both sides.
 initial_prompt: |-

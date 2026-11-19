@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/v2-api-explicit-recommendation
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building a services marketplace where providers offer services, customers book and pay through the platform, the platform keeps 10%, and providers need simple onboarding through Stripe embedded onboarding. What account type should I use? Reframe that question for the current Accounts v2 model and recommend the exact account dimensions and payment pattern.
 initial_prompt: |-

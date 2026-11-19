@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-dispute-evidence-approval
-version: 0.2.0
+version: 1.0.0
 task: |-
   Build a support tool to prepare evidence when a customer disputes a delivered order. I want to review it before anything is sent to the bank.
 initial_prompt: |-

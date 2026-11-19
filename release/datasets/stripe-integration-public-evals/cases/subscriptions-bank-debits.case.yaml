@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-bank-debits
-version: 0.1.0
+version: 1.0.0
 task: |-
   I'm building an accounting SaaS called "LedgerLeaf" using Node.js and TypeScript. US customers can pay a $120/month subscription by ACH Direct Debit and EU customers can pay by SEPA Direct Debit. Because both methods settle asynchronously, access must remain pending until the first invoice is actually paid and must be suspended if the debit later fails. Build the integration using Stripe Checkout and the stripe npm package. Requirements: - Choose the appropriate bank-debit payment method from customer region - Collect required mandate acceptance in Checkout - Represent pending, active, and failed payment states in the database - Handle delayed success and failure through webhooks - Never provision from the success redirect alone Assume an Express app and database helper exist.
 initial_prompt: |-

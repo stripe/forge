@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/connect-crowdfunding-3d
-version: 0.2.0
+version: 1.0.0
 task: |-
   Build the Stripe Connect integration for a crowdfunding platform for 3D-printed projects. Creators set funding goals; rewards may be a single object, a template, or a collection delivered over years. Backers pledge money, the platform keeps 5% only for funded campaigns, and creator payouts occur after the campaign ends. Recommend and implement a clear collection model, creator onboarding using embedded onboarding, fund routing, and payout gating.
 initial_prompt: |-

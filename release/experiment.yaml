@@ -3,7 +3,7 @@ version: 0.5.0
 dataset:
   path: ./datasets/stripe-integration-public-evals
   id: stripe-integration-public-evals
-  version: 0.5.0
+  version: 1.0.0
 runtime:
   adapter: docker
   image:

@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-terminal-reader-recovery
-version: 0.2.0
+version: 1.0.0
 task: |-
   Add a Pay on reader button to our shop's order screen. Staff need to know when they can hand over the goods, including when the reader disconnects.
 initial_prompt: |-

@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/on-demand-services-uber-like
-version: 0.2.0
+version: 1.0.0
 task: |-
   Build the Connect architecture for an on-demand food-delivery marketplace. Drivers are the service providers, customers order through the platform, the platform keeps 25% of each order, and drivers need fast onboarding through Stripe embedded onboarding, a simple earnings view, and weekly payouts. Provide Accounts v2 configuration, destination-charge payment logic, onboarding, readiness gating, and the payout schedule.
 initial_prompt: |-

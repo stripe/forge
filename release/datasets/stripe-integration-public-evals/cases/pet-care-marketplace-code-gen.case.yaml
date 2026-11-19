@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/pet-care-marketplace-code-gen
-version: 0.1.0
+version: 1.0.0
 task: |-
   Using Node.js and the stripe package, write server code for a pet-care marketplace. Pet owners book one dog walker or sitter per service; providers sign up and receive proceeds, and the platform keeps 15% of each booking. Implement Accounts v2 provider creation, embedded onboarding, a destination-charge PaymentIntent, exact commission rounding, and transfer-readiness gating.
 initial_prompt: |-

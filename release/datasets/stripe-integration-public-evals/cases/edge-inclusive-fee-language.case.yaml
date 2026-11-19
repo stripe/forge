@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/edge-inclusive-fee-language
-version: 0.2.0
+version: 1.0.0
 task: |-
   I run a photography marketplace where photographers sell prints. My total platform take is calculated as 10% of the customer charge, rounded to the nearest minor currency unit when the result is fractional.
 

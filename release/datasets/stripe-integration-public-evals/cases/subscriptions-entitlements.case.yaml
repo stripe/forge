@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-entitlements
-version: 0.1.0
+version: 1.0.0
 task: |-
   I'm building a developer platform called "BuildRail" using Node.js and TypeScript. The Pro and Enterprise Products grant different Stripe Entitlements such as advanced_builds, sso, and audit_logs. Build subscription signup and feature provisioning using the stripe npm package. Requirements: - Create Checkout for a selected recurring Price - Provision and revoke application features from Stripe's active entitlement state - Make entitlement changes authoritative even when a plan is swapped or canceled - Store the latest feature set in the database - Keep ordinary billing failures separate from entitlement synchronization Assume an Express app and a database helper already exist; Product-to-feature mappings are configured in Stripe.
 initial_prompt: |-

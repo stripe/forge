@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-fixed-usd-jpy-prices
-version: 0.2.0
+version: 1.0.0
 task: |-
   Sell our poster for exactly $25 in the US and ¥3,600 in Japan. Those are fixed prices, not exchange-rate conversions.
 initial_prompt: |-

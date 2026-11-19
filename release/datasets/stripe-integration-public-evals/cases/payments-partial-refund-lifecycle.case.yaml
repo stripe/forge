@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-partial-refund-lifecycle
-version: 0.2.0
+version: 1.0.0
 task: |-
   Add a support action to refund one returned item from an order. It should be safe to retry and show whether the refund actually went through.
 initial_prompt: |-

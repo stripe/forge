@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-payment-method-recovery
-version: 0.1.0
+version: 1.0.0
 task: |-
   I'm building a collaboration app called "BoardBase" using Next.js and TypeScript. When a renewal card fails, the account owner should be able to authenticate and save a replacement card for future off-session invoices, make it the subscription's default, and recover access after Stripe successfully collects payment. Build the recovery flow using the stripe npm package. Requirements: - Detect failed renewal invoices - Create a secure SetupIntent-based card replacement flow - Attach the PaymentMethod to the correct Customer and update the affected subscription - Retry or pay the open invoice after replacement - Restore access only after successful payment Assume Next.js App Router and a database helper already exist.
 initial_prompt: |-

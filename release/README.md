@@ -1,6 +1,7 @@
 # Stripe integration sample experiment
 
-The `stripe-integration-public-evals` dataset contains 69 cases covering
+The `stripe-integration-public-evals` dataset is version `1.0.0` and contains
+69 cases, each at version `1.0.0`, covering
 Connect (19), Payments (24), and Subscriptions (26). Each case includes its task,
 opening prompt, ten-turn limit, and judging criteria with explicit
 requirement levels. The cases have no fixture files or setup steps.

@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-multicurrency
-version: 0.1.0
+version: 1.0.0
 task: |-
   I'm building a payment page for a digital product (a stock photo pack, $19 USD). I sell to customers worldwide and want them to see prices in their local currency automatically — I don't want to build currency detection or conversion logic myself.
 

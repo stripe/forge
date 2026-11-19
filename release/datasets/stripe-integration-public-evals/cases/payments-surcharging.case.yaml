@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-surcharging
-version: 0.1.0
+version: 1.0.0
 task: |-
   We run a B2B SaaS platform and our payment processing costs have been eating into our margins. Our finance team wants us to pass credit card processing fees on to customers who choose to pay by credit card, while customers who pay by bank transfer should not be charged extra.
 

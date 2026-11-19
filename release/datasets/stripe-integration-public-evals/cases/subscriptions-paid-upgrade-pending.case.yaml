@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-paid-upgrade-pending
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building a video hosting service called "StreamForge" using Next.js and TypeScript. Customers on the $20/month Basic plan can upgrade immediately to the $80/month Studio plan, but the plan change must take effect only if Stripe successfully collects the prorated upgrade invoice. Build the upgrade flow with the stripe npm package. Requirements: - Preview the exact prorated amount before confirmation - Reuse the preview's proration timestamp in the update - Attempt immediate collection - Leave the customer on Basic when payment fails or authentication isn't completed - Update local access only after the pending update is applied Assume Next.js App Router and a database helper already exist.
 initial_prompt: |-

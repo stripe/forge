@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/freelancer-marketplace-upwork-like
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building a freelancer marketplace where clients hire freelancers for jobs. The platform keeps 20% of each payment, freelancers receive 80%, and freelancers need simple onboarding. Recommend the Accounts v2 configuration and implement an immediate one-freelancer payment flow, calculating the commission as round(charge_amount * 0.20) in minor units
 initial_prompt: |-

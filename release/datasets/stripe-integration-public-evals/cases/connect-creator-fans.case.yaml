@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/connect-creator-fans
-version: 0.2.0
+version: 1.0.0
 task: |-
   Build the Stripe Connect integration for a Patreon-like product where creators sell monthly access to fans. Fans pay monthly, creators receive 90%, and the platform keeps 10%. Keep signup and payment management integrated into the app. Provide Accounts v2 creation, embedded onboarding, recurring payment creation, fee collection, and readiness checks.
 initial_prompt: |-

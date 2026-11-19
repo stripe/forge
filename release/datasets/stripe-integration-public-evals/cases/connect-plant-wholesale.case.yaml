@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/connect-plant-wholesale
-version: 0.2.0
+version: 1.0.0
 task: |-
   Build the Stripe Connect integration for a SaaS product that lets independent plant wholesalers create online stores and accept payments from their own customers. The wholesalers already run their own businesses but are new to online payments. Provide the Accounts v2 account configuration, onboarding and account-management flow, direct-charge payment pattern, readiness check, and options for how my platform can monetize the software.
 initial_prompt: |-

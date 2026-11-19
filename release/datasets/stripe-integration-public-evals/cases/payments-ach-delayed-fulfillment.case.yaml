@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-ach-delayed-fulfillment
-version: 0.2.0
+version: 1.0.0
 task: |-
   Let US customers pay for our equipment orders from their bank accounts. Don't send an order to the warehouse until the payment has succeeded.
 initial_prompt: |-
