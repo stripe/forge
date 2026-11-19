@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/b2b-enterprise-platform
-version: 0.2.0
+version: 1.0.0
 task: |-
   Design the Connect architecture for an enterprise procurement platform serving established vendors with complex billing. The business asks for fully white-labeled onboarding and complete control of the payment experience. Explain the operational commitment, recommend an Accounts v2 configuration and charge pattern, and show how the platform retains revenue.
 initial_prompt: |-

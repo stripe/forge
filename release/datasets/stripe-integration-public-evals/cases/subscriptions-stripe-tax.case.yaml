@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-stripe-tax
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building a global analytics SaaS called "MetricNest" using Node.js and TypeScript. Customers in multiple countries subscribe to a $39/month plan, and Stripe should calculate tax from the customer's billing address. Build the subscription signup and renewal integration using the stripe npm package and Stripe Tax. Requirements: - Collect the customer's billing address during Checkout - Enable automatic tax on the subscription - Require a valid customer address update when Stripe needs more location data - Display subtotal, tax, and total on the confirmation page - Keep tax and subscription state synchronized through webhooks Assume an Express app and server-rendered checkout page already exist.
 initial_prompt: |-

@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-authorize-partial-capture
-version: 0.2.0
+version: 1.0.0
 task: |-
   Reserve the order amount on the customer's card, but only charge for the items we actually pack. Cancel the hold if we can't fulfill the order.
 initial_prompt: |-

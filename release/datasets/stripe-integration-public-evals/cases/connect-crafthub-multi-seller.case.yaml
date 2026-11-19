@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/connect-crafthub-multi-seller
-version: 0.2.0
+version: 1.0.0
 task: |-
   Build the Stripe Connect integration for CraftHub, a two-sided marketplace where one checkout can contain handmade items from several artisan sellers. A cart may contain items from multiple sellers. The platform keeps 12% of each item price and each seller receives 88% of that seller's item subtotal.
 initial_prompt: |-

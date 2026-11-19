@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/saas-self-serve-platform-managed-pricing
-version: 0.2.0
+version: 1.0.0
 task: |-
   Build Connect for a self-serve SaaS product where independent bookkeepers create invoicing pages and accept payments from their own clients. Bookkeepers onboard without sales help using Stripe embedded onboarding and need a lightweight experience. The platform wants to control transaction pricing through Stripe's platform-pricing tooling because it has negotiated rates, but it will not accept negative-balance liability. Provide the exact Accounts v2 configuration, direct-charge flow, onboarding, readiness check, and availability caveats.
 initial_prompt: |-

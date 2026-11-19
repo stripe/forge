@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-card-element-migration
-version: 0.2.0
+version: 1.0.0
 task: |-
   Replace our old card-only payment form with Stripe's newer payment form. Keep the backend payment flow and order tracking working as they are.
 initial_prompt: |-

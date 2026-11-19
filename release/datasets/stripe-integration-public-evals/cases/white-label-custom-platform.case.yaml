@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/white-label-custom-platform
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm designing a fully branded payment platform for a franchise network. Each franchise location accepts payments under our brand, should not see Stripe branding, and needs onboarding and ongoing account operations. Recommend the best architecture; dashboard none is acceptable only if the white-label requirement truly justifies its operational burden. Explain charge-pattern and fee-model choices that depend on whether a franchise or the platform owns the customer transaction.
 initial_prompt: |-

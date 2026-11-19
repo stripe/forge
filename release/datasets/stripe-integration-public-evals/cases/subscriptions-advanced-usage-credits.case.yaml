@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-advanced-usage-credits
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building a generative-AI API with a $100 monthly platform fee, token-based overages, and $50 of recurring monthly usage credits that burn down in real time. New customers should use Stripe's current advanced usage-based billing stack. Build the integration with Node.js/TypeScript and the stripe npm package, including usage ingestion, credits, invoicing, and plan-version changes.
 initial_prompt: |-

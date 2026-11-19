@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-prebilling
-version: 0.2.0
+version: 1.0.0
 task: |-
   A training company sells a six-month subscription at $200/month but collects the first three service periods up front when the customer signs. After the prepaid period, the subscription should resume normal monthly invoicing without duplicate charges. Build the integration and invoice reconciliation in Node.js/TypeScript with the stripe npm package.
 initial_prompt: |-

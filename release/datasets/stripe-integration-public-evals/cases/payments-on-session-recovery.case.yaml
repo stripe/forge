@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-on-session-recovery
-version: 0.2.0
+version: 1.0.0
 task: |-
   Buyers get stuck after a declined card or closing their bank's verification screen. Let them try again without losing their order or paying twice.
 initial_prompt: |-

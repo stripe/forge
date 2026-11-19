@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-cardless-trial
-version: 0.1.0
+version: 1.0.0
 task: |-
   I'm building a writing assistant called "DraftPilot" using Next.js and TypeScript. Users can start a 14-day Pro trial without entering a card. Three days before the trial ends, ask them to add a payment method; if none is present at the end, pause the subscription and access. Build the flow using the stripe npm package. Requirements: - Start a subscription trial without Checkout collecting a payment method - Configure Stripe's missing-payment-method behavior - Create a SetupIntent flow for adding a card during the trial - Resume the paused subscription after a valid payment method is attached - Synchronize trial and access state through webhooks Assume Next.js App Router is set up.
 initial_prompt: |-

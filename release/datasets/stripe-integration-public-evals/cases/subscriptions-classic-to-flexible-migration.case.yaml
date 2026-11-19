@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-classic-to-flexible-migration
-version: 0.2.0
+version: 1.0.0
 task: |-
   We have existing Stripe subscriptions in classic billing mode and want to migrate selected subscriptions to flexible billing mode without changing the customer's Price, quantity, renewal date, or access. Build a safe migration command in Node.js/TypeScript that previews impact, migrates one subscription, verifies the result, and can be retried.
 initial_prompt: |-

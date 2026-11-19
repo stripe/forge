@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-checkout-duplicate-prevention
-version: 0.1.0
+version: 1.0.0
 task: |-
   I'm adding subscription Checkout to a multi-tenant SaaS application. Concurrent requests, browser retries, or repeated clicks must not create duplicate Customers or subscriptions, and users must not be able to choose arbitrary Prices or another tenant's Customer. Build the secure Next.js/TypeScript flow.
 initial_prompt: |-

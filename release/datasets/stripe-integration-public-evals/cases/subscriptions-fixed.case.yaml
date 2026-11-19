@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-fixed
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building a SaaS project management tool called "TaskFlow" using Next.js and TypeScript. I need to add subscription billing so users can subscribe to our $29/month Pro plan. Build the Stripe billing integration. Use the `stripe` npm package. Requirements: - A pricing page with a "Subscribe" button for the Pro plan ($29/month) - When a user clicks Subscribe, they go through a payment flow and land on a success page - A webhook endpoint that handles subscription lifecycle events (new subscription, cancellation, payment failure) and updates user status in the database (stub the DB write) Assume Next.js App Router is not set up. Build out the Stripe integration pieces: the checkout flow, portal, API routes, and webhook handler.
 initial_prompt: |-

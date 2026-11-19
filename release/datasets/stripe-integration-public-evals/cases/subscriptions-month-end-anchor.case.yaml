@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-month-end-anchor
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building an accounting service that bills every customer on the last day of each month, including February and months with only 30 days. New customers should see the prorated first charge before they confirm. Build subscription creation and preview logic in Node.js/TypeScript using the stripe npm package.
 initial_prompt: |-

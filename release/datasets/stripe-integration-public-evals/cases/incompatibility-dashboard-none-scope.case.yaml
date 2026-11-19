@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/incompatibility-dashboard-none-scope
-version: 0.1.0
+version: 1.0.0
 task: |-
   IMPORTANT: Non-interactive mode. Build the architecture for a fully white-labeled payment platform whose business clients must never see Stripe branding. I explicitly require dashboard none and custom onboarding, payment views, refunds, disputes, and remediation. The platform takes 12% on single-recipient destination charges. Provide the Accounts v2 configuration and implementation plan while clearly stating the operational burden.
 initial_prompt: |-

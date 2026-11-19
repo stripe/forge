@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-zero-total-checkout
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm giving workshop attendees a code for a free copy of my paid ebook. Let them redeem it through checkout and still receive the download.
 initial_prompt: |-

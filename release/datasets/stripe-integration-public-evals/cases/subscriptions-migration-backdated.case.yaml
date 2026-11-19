@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-migration-backdated
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm migrating active monthly subscriptions from another billing provider to Stripe. Each customer already has a Stripe Customer and migrated default payment method. Preserve the original service start date and next renewal date, do not charge again for time already paid to the old provider, and make the batch safe to retry. Build the migration worker in Node.js/TypeScript with the stripe npm package.
 initial_prompt: |-

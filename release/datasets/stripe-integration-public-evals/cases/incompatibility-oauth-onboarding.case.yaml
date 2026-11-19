@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/incompatibility-oauth-onboarding
-version: 0.1.0
+version: 1.0.0
 task: |-
   IMPORTANT: Non-interactive mode. I'm building a freelance marketplace where freelancers provide services and the platform keeps 10%. We initially wanted OAuth to connect freelancers' existing Stripe accounts. Explain whether that is a standard supported new-account flow, redirect me appropriately for existing-account connectivity, and provide a concrete replacement path using newly created Accounts v2 accounts and embedded onboarding.
 initial_prompt: |-

@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/incompatibility-stripe-losses-destination-charges
-version: 0.2.0
+version: 1.0.0
 task: |-
   IMPORTANT: Non-interactive mode. I'm building a ride-sharing marketplace. Drivers provide rides, the platform owns the rider relationship, each ride routes immediately to one driver, and we keep 20%. Drivers need a simple earnings dashboard. We proposed destination charges while asking Stripe to collect fees and own all negative-balance losses. Identify and correct any incompatible requirements, then give the valid Accounts v2 configuration and fee flow.
 initial_prompt: |-

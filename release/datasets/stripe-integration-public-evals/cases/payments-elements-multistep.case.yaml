@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-elements-multistep
-version: 0.1.0
+version: 1.0.0
 task: |-
   We're building a premium e-commerce site selling luxury watches internationally. Our checkout needs to be a multi-step flow on our own site: first we collect shipping address, then calculate taxes and duties, then show payment options. We need full control over how the checkout steps are displayed and ordered, but we'd rather Stripe handle taxes, discounts, and shipping calculations without building our own calculation logic.
 

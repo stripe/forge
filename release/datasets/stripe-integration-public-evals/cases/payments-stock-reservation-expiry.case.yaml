@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-stock-reservation-expiry
-version: 0.1.0
+version: 1.0.0
 task: |-
   We're selling 20 limited-edition prints. Hold stock while someone checks out, then make it available again if they abandon checkout.
 initial_prompt: |-

@@ -27,17 +27,19 @@ describe('sample dataset release', () => {
     ]);
     assert.deepEqual(dataset.manifest.dataset, {
       id: 'stripe-integration-public-evals',
-      version: '0.5.0',
+      version: '1.0.0',
     });
     assert.equal(dataset.manifest.cases.length, 69);
     assert.equal(dataset.cases.size, 69);
+    for (const entry of dataset.manifest.cases)
+      assert.equal(entry.version, '1.0.0');
     assert.deepEqual(
       dataset.manifest.cases.find(
         ({ id }) => id === 'stripe-integration-public-evals/payments-onetime',
       ),
       {
         id: 'stripe-integration-public-evals/payments-onetime',
-        version: '0.2.0',
+        version: '1.0.0',
         path: 'cases/payments-onetime.case.yaml',
       },
     );

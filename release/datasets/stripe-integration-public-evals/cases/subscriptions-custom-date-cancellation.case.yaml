@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-custom-date-cancellation
-version: 0.1.0
+version: 1.0.0
 task: |-
   A customer has a subscription with licensed and metered items and wants service to end on a specific date between renewal dates. Preview the final billing impact, schedule cancellation, include final usage correctly, and allow reactivation before the cancellation takes effect. Build this in Node.js/TypeScript.
 initial_prompt: |-

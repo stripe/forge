@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-saved-card-consent
-version: 0.2.0
+version: 1.0.0
 task: |-
   Let returning customers reuse a saved card at checkout, and let new buyers choose whether to save theirs for next time. A stubbed resolver is acceptable.
 initial_prompt: |-

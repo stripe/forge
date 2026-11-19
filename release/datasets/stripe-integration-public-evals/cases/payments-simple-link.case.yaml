@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-simple-link
-version: 0.1.0
+version: 1.0.0
 task: |-
   I want to sell a $25 PDF ebook with the minimum possible code. I just need a shareable payment link I can put on my website and in emails — customers click it, pay, and get a confirmation. Use the Stripe API to create this programmatically. Use Node.js/TypeScript and the `stripe` npm package. Requirements: - A script or endpoint that creates a payment link for the ebook - The link should be reusable (multiple customers can use it) - Print or return the payment link URL - A webhook endpoint to receive payment notifications Keep it minimal — no need for a full web server or custom checkout form.
 initial_prompt: |-

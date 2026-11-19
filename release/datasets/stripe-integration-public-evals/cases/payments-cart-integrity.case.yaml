@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/payments-cart-integrity
-version: 0.2.0
+version: 1.0.0
 task: |-
   Add Stripe checkout to my stationery shop's cart. Customers can buy several products and choose how many of each they want.
 initial_prompt: |-

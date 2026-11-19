@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-schedules-phases
-version: 0.1.0
+version: 1.0.0
 task: |-
   I'm building a cohort-based learning platform called "LaunchClass" using Node.js and TypeScript. A school signs a six-month contract: month 1 is free onboarding, months 2-3 cost $300/month, and months 4-6 cost $500/month; the subscription should cancel after the final phase. Build this contract with Stripe Subscription Schedules and the stripe npm package. Requirements: - Create or reuse a Customer - Define dated phases with the correct Prices and quantities - Configure the schedule to cancel after the last phase - Provide an endpoint to preview and update a future phase without changing the current charge - Keep contract state synchronized through webhooks Assume an Express app exists and Price IDs are environment variables.
 initial_prompt: |-

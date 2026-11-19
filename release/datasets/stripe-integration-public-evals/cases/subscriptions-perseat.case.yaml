@@ -1,5 +1,5 @@
 id: stripe-integration-public-evals/subscriptions-perseat
-version: 0.2.0
+version: 1.0.0
 task: |-
   I'm building a team collaboration tool called "TeamSync" using Next.js and TypeScript. Teams pay $10 per user per month. When a team admin adds or removes seats, billing should adjust automatically. Build the Stripe billing integration. Use the `stripe` npm package. Requirements: - A signup flow where the team admin subscribes and selects the number of seats - An endpoint to add seats (increase quantity) and remove seats (decrease quantity) mid-cycle, with prorated billing - A webhook endpoint that handles subscription updates, payment failures, and invoice events - Show the current seat count and next invoice amount Assume Next.js App Router is already set up. Build out the Stripe integration pieces.
 initial_prompt: |-
