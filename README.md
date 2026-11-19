@@ -1,13 +1,15 @@
 # Stripe Forge
 
+In a multi-turn case, a simulated developer named Ava turns the task into
+private needs and asks follow-up questions, and a separate judge model scores
+the coding agent's recorded work against the case's criteria.
+
 Forge is an evaluation harness for coding agents. It runs real agents (Claude
 Code, Codex, and an experimental OpenCode adapter) inside isolated Docker
-containers on realistic integration tasks. A simulated developer named Ava
-holds private requirements and reveals them over a multi-turn conversation. An
-LLM judge then grades the result against a MUST/SHOULD rubric, using the
-conversation transcript and the files the agent left in its workspace.
-Experiments run the same cases under different arms, such as with and without
-a plugin, so you can compare them on matched tasks.
+containers on realistic integration tasks. Ava holds private requirements and
+reveals them over the conversation. The judge grades the result against a
+MUST/SHOULD rubric. Experiments run the same cases under different arms, such
+as with and without a plugin, so you can compare them on matched tasks.
 
 Forge is in early development. See the
 [current limitations](docs/architecture.md#current-limitations) before
@@ -15,29 +17,49 @@ designing a benchmark on it.
 
 ## Why Forge exists
 
-Most coding benchmarks check whether code passes tests or reaches an expected
-end state. Forge grades the decisions that make an integration correct:
-choosing the right API, getting money semantics and safety right, and warning
-about designs that are unsafe or unsupported.
+Forge grades the decisions that make an integration correct: choosing the
+right API, getting money semantics and safety right, and warning about designs
+that are unsafe or unsupported.
 
 Forge complements test-based evaluation; it does not replace it. It does not
-execute the agent's code after the session. The judge reads the transcript and
-a bounded snapshot of the workspace text, so a judgment can be wrong in ways a
-passing test would not be.
+execute the agent's code after the session, so a judgment can be wrong in ways
+a passing test would not be.
+
+### What the judge sees
+
+The judge receives the recorded transcript of the agent's session, including
+its tool calls and their results, bounded text from the workspace, the one
+criterion being judged, and an optional example answer. It does not receive
+Ava's private needs or her decision history, the agent's private reasoning,
+system or copied-context steps, or raw subagent traces. Ava's private needs
+are not the rubric; the criteria are written in the case.
+
+Ava stopping because her needs look met is her own assessment. It is not
+verified task success, and it does not change the score; only the judge's
+verdicts and any deterministic checks do.
 
 ## Quickstart
 
-You need Node.js 22.12 or newer, Git, Docker with a Linux `amd64` or `arm64`
-server, and two API keys: an Anthropic key for the coding agent (Claude Code) and an OpenAI
-key for Ava and the judge, which default to an OpenAI model. A run makes
-billable model calls.
+You need:
+
+- Node.js 22.13 or newer, and pnpm 11.6.0. On Node versions that bundle
+  Corepack, `corepack enable` provides the pinned pnpm. Node 25 and later do
+  not bundle it; install pnpm with `npm install -g pnpm@11.6.0` instead.
+- Git.
+- Docker that can run `linux/amd64` containers. The sample experiment pins that
+  platform, so on an ARM host Docker needs x86 emulation.
+- An Anthropic key for the coding agent (Claude Code) and an OpenAI key for Ava
+  and the judge, which default to an OpenAI model. A run makes billable model
+  calls.
+- [`jq`](https://jqlang.github.io/jq/), only for the commands that read the
+  results.
 
 Clone and build Forge:
 
 ```sh
 git clone https://github.com/stripe/forge.git
 cd forge
-corepack enable
+corepack enable # skip if pnpm 11.6.0 is already installed
 pnpm install --frozen-lockfile
 pnpm build
 ```
@@ -66,7 +88,7 @@ Forge reads a key from your environment only when you grant it with
 access. Progress goes to stderr. `run-summary.json` records where the results
 were saved.
 
-Read the evaluation and the report with [`jq`](https://jqlang.github.io/jq/):
+Read the evaluation and the report:
 
 ```sh
 jq .evaluation "$(jq -r .location run-summary.json)/runs/payments-001/result.json"
@@ -101,73 +123,40 @@ scores were.
   either stops or sends a follow-up that addresses one remaining need, until
   the needs are met or the turn limit is reached.
 - **Judge.** A model that grades each criterion on its own against the
-  transcript and the workspace text, then returns pass or fail with an
-  explanation. Ava and the judge use host-side models chosen separately from
+  transcript and the workspace text (see [what the judge sees](#what-the-judge-sees)),
+  then returns pass or fail with an explanation. Ava and the judge use host-side models chosen separately from
   the coding agent.
 
 ## What a result looks like
 
-Each run's `result.json` has an `evaluation`. The values below are
-illustrative; the fields are the ones Forge writes (shown for a case with
-four `MUST` and four `SHOULD` criteria, with the list cut to two entries):
+Each run's `result.json` has an `evaluation` with a score, a status, counts of
+criteria, one entry per criterion, and the deterministic check results. A
+criterion entry has this shape (`label` is optional):
 
 ```json fragment
 {
-  "score": 0.875,
-  "status": "partial",
-  "judging_criteria_passed": 7,
-  "judging_criteria_total": 8,
-  "judging_criteria_errored": 0,
-  "judging_criteria": [
-    {
-      "requirement_level": "MUST",
-      "criterion": "MUST: Has success_url configured for the post-payment redirect",
-      "passed": true,
-      "explanation": "The checkout session is created with a success_url."
-    },
-    {
-      "requirement_level": "SHOULD",
-      "criterion": "Has cancel_url configured",
-      "passed": false,
-      "explanation": "No cancel_url is set on the session."
-    }
-  ],
-  "checks": []
+  "requirement_level": "SHOULD",
+  "criterion": "Has cancel_url configured",
+  "passed": false,
+  "explanation": "No cancel_url is set on the session."
 }
 ```
 
-The score is the fraction of valid `MUST` and `SHOULD` judgments that passed.
-Status is `passed`, `partial`, `failed`, or `judge_error` when a criterion
-could not be judged.
+| Field | Meaning |
+| --- | --- |
+| `score` | The fraction of valid `MUST` and `SHOULD` judgments that passed. `OPTIONAL` criteria are not scored. |
+| `status` | `passed`, `partial`, `failed`, or `judge_error` when a `MUST` or `SHOULD` criterion could not be judged. |
+| `judging_criteria_passed`, `judging_criteria_total`, `judging_criteria_errored` | Counts of scored criteria. |
+| `judging_criteria` | Each criterion's text, level, `passed` (`null` if it could not be judged), and explanation. |
+| `checks` | Results of deterministic file and tool-call checks. |
 
-`report.json` aggregates all runs in the experiment. One entry of `cases`
-looks like this for a single completed run (illustrative values):
-
-```json
-{
-  "case_id": "stripe-integration-public-evals/payments-onetime",
-  "treatment": "baseline",
-  "agent": {
-    "adapter": "claude-code",
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-6"
-  },
-  "completed": 1,
-  "errored": 0,
-  "judge_errors": { "evaluations": 0, "criteria": 0 },
-  "pass_rate": 0,
-  "criterion_scores": {
-    "required": { "strict": 1, "avg": 1, "evaluations": 1 },
-    "recommended": { "strict": 0, "avg": 0.875, "evaluations": 1 },
-    "blend": { "score": 0.75, "evaluations": 1 }
-  }
-}
-```
-
-Required covers `MUST` criteria and Recommended covers `MUST` plus `SHOULD`.
-`strict` is 1 only when every criterion in the set passed, and `avg` is the
-fraction of valid judgments that passed. `blend` is 0 if any `MUST` fails, and
-otherwise the fraction of valid `SHOULD` judgments that passed. The exact formulas are in the
+`report.json` aggregates all runs in the experiment into a `summary`, one entry
+per case, treatment, and agent in `cases`, and one row per run in `runs`. Each
+`cases` entry reports `completed`, `errored`, `judge_errors`, `pass_rate`, and
+`criterion_scores` for the `required` (`MUST`) and `recommended` (`MUST` plus
+`SHOULD`) sets, plus a `blend` score. Scores can be `null` when a criterion
+could not be judged. The formulas, including how they aggregate across runs,
+are in the
 [scores section of the reference](docs/reference.md#understand-scores).
 
 ## Where to go next
@@ -197,7 +186,8 @@ otherwise the fraction of valid `SHOULD` judgments that passed. The exact formul
 - **No execution of the agent's code.** Forge does not run the agent's code
   after the session or run post-agent test commands. Its deterministic checks
   cover file creation, existence, regex content, and tool-call names and
-  arguments. The judge sees bounded text from the workspace, not behavior.
+  arguments. The judge can read the commands the agent ran and their output in
+  the transcript, but Forge does not independently verify runtime behavior.
 - **One domain.** The bundled dataset has 69 cases, all Stripe integrations
   across Connect, Payments, and Subscriptions. Results say little about other
   kinds of work until you add cases of your own.
@@ -206,4 +196,4 @@ otherwise the fraction of valid `SHOULD` judgments that passed. The exact formul
 
 ## License
 
-Apache-2.0. See [LICENSE](https://github.com/stripe/forge/blob/main/LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).
