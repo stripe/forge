@@ -1,19 +1,17 @@
 # Stripe Forge
 
-In a multi-turn case, a simulated developer named Ava turns the task into
-private needs and asks follow-up questions, and a separate judge model scores
-the coding agent's recorded work against the case's criteria.
+Forge tests coding agents the way developers actually use them: a short
+request, a back-and-forth conversation, and code that has to be right in the
+details. It runs real agents (Claude Code, Codex, and an 
+experimental OpenCode adapter) inside isolated Docker containers on realistic 
+integration tasks. 
 
-Forge is an evaluation harness for coding agents. It runs real agents (Claude
-Code, Codex, and an experimental OpenCode adapter) inside isolated Docker
-containers on realistic integration tasks. Ava holds private requirements and
+A roleplaying agent holds private requirements and
 reveals them over the conversation. The judge grades the result against a
 MUST/SHOULD rubric. Experiments run the same cases under different arms, such
 as with and without a plugin, so you can compare them on matched tasks.
 
-Forge is in early development. See the
-[current limitations](docs/architecture.md#current-limitations) before
-designing a benchmark on it.
+Forge is in early development.
 
 ## Why Forge exists
 
