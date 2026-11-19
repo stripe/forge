@@ -26,46 +26,63 @@ describe('development snapshot publishing', () => {
     const stamped = await runSnapshot('0.2.0-dev.0');
     assert.equal(stamped.status, 0, stamped.stderr);
     assert.equal(stamped.version, '0.2.0-dev.123');
-    assert.equal(stamped.output, 'publish=true\n');
-    assert.equal(snapshot.id, 'snapshot');
     const check = steps.find((step) => step.name === 'Check package')!;
     const publish = steps.find((step) => step.name === 'Publish snapshot')!;
     assert.ok(steps.indexOf(snapshot) < steps.indexOf(check));
     assert.ok(steps.indexOf(check) < steps.indexOf(publish));
-    assert.equal(check.if, "steps.snapshot.outputs.publish == 'true'");
-    assert.equal(publish.if, check.if);
+    assert.equal(check.if, undefined);
+    assert.equal(publish.if, undefined);
   });
 
-  it('skips stable release commits without changing their version', async () => {
-    const skipped = await runSnapshot('0.2.0');
-    assert.equal(skipped.status, 0, skipped.stderr);
-    assert.equal(skipped.version, '0.2.0');
-    assert.equal(skipped.output, 'publish=false\n');
+  it('publishes successive snapshots of the next patch after a stable release', async () => {
+    for (const [version, runNumber, expected] of [
+      ['1.0.0', '123', '1.0.1-dev.123'],
+      ['1.0.0', '124', '1.0.1-dev.124'],
+      ['1.2.9', '125', '1.2.10-dev.125'],
+    ] as const) {
+      const stamped = await runSnapshot(version, runNumber);
+      assert.equal(stamped.status, 0, stamped.stderr);
+      assert.equal(stamped.version, expected);
+    }
   });
 
-  it('rejects prereleases that are not development snapshot bases', async () => {
-    for (const version of ['0.2.0-rc.1', '0.2.0-dev.7']) {
+  it('rejects unsupported version formats before changing the package', async () => {
+    for (const version of ['0.2.0-rc.1', '0.2.0-dev.7', '01.0.0']) {
       const rejected = await runSnapshot(version);
       assert.equal(rejected.status, 1);
       assert.match(
         rejected.stderr,
-        /Expected package version to end in -dev.0/,
+        /Expected a stable package version or one ending in -dev.0/,
       );
       assert.equal(rejected.version, version);
-      assert.equal(rejected.output, '');
+    }
+  });
+
+  it('rejects missing or invalid run numbers before changing the package', async () => {
+    for (const runNumber of ['', '0', 'not-a-number']) {
+      const rejected = await runSnapshot('1.0.0', runNumber);
+      assert.equal(rejected.status, 1);
+      assert.match(
+        rejected.stderr,
+        /Expected a positive GitHub Actions run number/,
+      );
+      assert.equal(rejected.version, '1.0.0');
     }
   });
 });
 
-async function runSnapshot(version: string) {
+async function runSnapshot(version: string, runNumber = '123') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-publish-dev-'));
   try {
     await fs.writeFile(
       path.join(root, 'package.json'),
       JSON.stringify({ name: 'snapshot-test', version }),
     );
-    const output = path.join(root, 'github-output');
-    await fs.writeFile(output, '');
+    await fs.mkdir(path.join(root, 'scripts'));
+    await fs.copyFile(
+      path.resolve('scripts/snapshot-version.mjs'),
+      path.join(root, 'scripts', 'snapshot-version.mjs'),
+    );
     const result = spawnSync(
       'bash',
       ['-e', '-o', 'pipefail', '-c', snapshot.run!],
@@ -75,8 +92,7 @@ async function runSnapshot(version: string) {
         timeout: 10_000,
         env: {
           ...process.env,
-          GITHUB_RUN_NUMBER: '123',
-          GITHUB_OUTPUT: output,
+          GITHUB_RUN_NUMBER: runNumber,
         },
       },
     );
@@ -88,7 +104,6 @@ async function runSnapshot(version: string) {
           await fs.readFile(path.join(root, 'package.json'), 'utf8'),
         ) as { version: string }
       ).version,
-      output: await fs.readFile(output, 'utf8'),
     };
   } finally {
     await fs.rm(root, { recursive: true, force: true });
