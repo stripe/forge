@@ -93,7 +93,10 @@ const CaseTagValueSchema = z
   .min(1)
   .max(MAX_CASE_TAG_VALUE_BYTES);
 const CaseTagsSchema = z
-  .record(CaseTagKeySchema, CaseTagValueSchema)
+  .record(
+    CaseTagKeySchema,
+    z.union([CaseTagValueSchema, z.array(CaseTagValueSchema).min(1).max(32)]),
+  )
   .superRefine((tags, context) => {
     if (Object.keys(tags).length > MAX_CASE_TAG_COUNT) {
       context.addIssue({

@@ -1029,6 +1029,49 @@ treatments:
     );
   });
 
+  it('accepts bounded string arrays without changing scalar tags or array order', () => {
+    const definition = { id: 'suite/task', version: '0.1.0', task: 'Do it.' };
+    const tags = {
+      env: ' prod ',
+      areas: [' payments ', 'billing', 'payments'],
+      single: ['one'],
+    };
+    const parsed = parseEvalCase({ ...definition, tags });
+    assert.deepEqual(parsed.tags, {
+      env: 'prod',
+      areas: ['payments', 'billing', 'payments'],
+      single: ['one'],
+    });
+    assert.deepEqual(tags.areas, [' payments ', 'billing', 'payments']);
+    assert.deepEqual(
+      parseEvalCaseYaml(
+        'id: suite/task\nversion: 0.1.0\ntask: Do it.\ntags:\n  areas: [payments, billing]\n',
+      ).tags,
+      { areas: ['payments', 'billing'] },
+    );
+    const maximum = parseEvalCase({
+      ...definition,
+      tags: { areas: Array(32).fill('x'.repeat(256)) },
+    }).tags?.areas;
+    assert.ok(Array.isArray(maximum));
+    assert.equal(maximum.length, 32);
+    for (const value of [
+      [],
+      [''],
+      ['   '],
+      ['x', 1],
+      [null],
+      [['x']],
+      ['x'.repeat(257)],
+      Array(33).fill('x'),
+    ]) {
+      assert.throws(
+        () => parseEvalCase({ ...definition, tags: { areas: value } }),
+        BenchmarkModelError,
+      );
+    }
+  });
+
   it('does not materialize tags to an empty object for cases without tags', () => {
     const definition = {
       id: 'suite/task',
