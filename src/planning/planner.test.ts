@@ -26,6 +26,34 @@ const CASE_A_PATH = 'cases/case/a/case.yaml';
 const CASE_B_PATH = 'cases/case-b.case.yaml';
 
 describe('experiment expansion and run planning', () => {
+  it('clones and freezes tag arrays and retains their order in canonical plans', () => {
+    const tags = { env: 'prod', areas: ['payments', 'billing'] };
+    const loaded = inputs({ caseDefinition: { ...evalCase(), tags } });
+    const selection = expandExperiment(loaded.experiment, loaded.dataset)[0]!;
+    const plan = resolveRunPlan({ ...loaded, selection });
+    tags.areas.push('changed');
+    assert.deepEqual(plan.case.tags, {
+      env: 'prod',
+      areas: ['payments', 'billing'],
+    });
+    assert.ok(Object.isFrozen(plan.case.tags?.areas));
+    const serialized = serializeResolvedRunPlan(plan);
+    assert.deepEqual(
+      parseResolvedRunPlan(JSON.parse(serialized)).case.tags,
+      plan.case.tags,
+    );
+    assert.notEqual(
+      resolvedRunPlanSha256(plan),
+      resolvedRunPlanSha256({
+        ...plan,
+        case: {
+          ...plan.case,
+          tags: { env: 'prod', areas: ['billing', 'payments'] },
+        },
+      }),
+    );
+  });
+
   it('binds named groups to selections and plan identity without using array position', () => {
     const config = experimentConfig();
     const axes = getMatrixGroups(config.matrix)[0]!;

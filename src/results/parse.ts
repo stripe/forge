@@ -744,7 +744,19 @@ const caseTagsResultSchema = z.record(
     .string()
     .max(128)
     .regex(/^[a-z][a-z0-9_]*$/),
-  z.string().min(1).max(256),
+  z.union([
+    z.string().min(1).max(256),
+    z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(256)
+          .refine((value) => value.trim().length > 0),
+      )
+      .min(1)
+      .max(32),
+  ]),
 );
 
 const runResultFields = {

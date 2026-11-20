@@ -147,6 +147,31 @@ afterEach(async () => {
 });
 
 describe('local artifact store', () => {
+  it('parses mixed tag values and rejects malformed array values', () => {
+    const result = resultFor([]);
+    const tags = {
+      env: 'prod',
+      areas: ['payments', 'billing'],
+      single: ['one'],
+    };
+    assert.deepEqual(
+      parseRunResult({ ...result, case_tags: tags }).case_tags,
+      tags,
+    );
+    for (const areas of [
+      [],
+      [''],
+      ['   '],
+      [1],
+      [null],
+      [['x']],
+      ['x'.repeat(257)],
+      Array(33).fill('x'),
+    ]) {
+      assert.throws(() => parseRunResult({ ...result, case_tags: { areas } }));
+    }
+  });
+
   it('commits result.json last and verifies every claimed byte', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-store-test-'));
     roots.push(root);

@@ -51,6 +51,32 @@ afterEach(async () => {
 });
 
 describe('executeEval', () => {
+  it('persists mixed scalar and array tags through execution and completed-run verification', async () => {
+    const fixture = await executionFixture();
+    const tags = {
+      env: 'prod',
+      areas: ['payments', 'billing', 'payments'],
+      single: ['one'],
+    };
+    fixture.plan.case.tags = tags;
+    const completed = await executeEval({
+      runId: 'array-tags',
+      plan: fixture.plan,
+      composition: fixture.composition(
+        createArtifactStore({ root: path.join(fixture.root, 'artifacts') }),
+      ),
+    });
+    assert.deepEqual(completed.result.case_tags, tags);
+    assert.deepEqual(
+      (await verifyCompletedRun(completed.location)).result.case_tags,
+      tags,
+    );
+    const plan = JSON.parse(
+      await fs.readFile(path.join(completed.location, 'plan.json'), 'utf8'),
+    );
+    assert.deepEqual(plan.case.tags, tags);
+  });
+
   it('persists a preflight metadata snapshot without replacing custom adapter versions', async () => {
     const fixture = await executionFixture();
     const store = createArtifactStore({
