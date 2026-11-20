@@ -1556,7 +1556,8 @@ sets its own limits.
 freeform case metadata. Keys must match `[a-z][a-z0-9_]*` (up to 128 characters).
 Each string is nonblank, trimmed, and at most 256 UTF-16 code units. Arrays
 contain 1–32 strings; their order and duplicates are preserved, and a single
-element remains an array. A case may have up to 32 tags. When a case defines `tags`, Forge carries them through the parsed case,
+element remains an array. A case may have up to 32 tags. When a case defines
+`tags`, Forge carries them through the parsed case,
 resolved plan (in `plan.case.tags`), and result (`case_tags` at the top level
 of `result.json`). Cases without `tags` produce no `tags` field in the parsed
 case, plan, or result. **Do not put sensitive data in tags.**
@@ -1564,7 +1565,9 @@ case, plan, or result. **Do not put sensitive data in tags.**
 ```yaml
 tags:
   difficulty: hard
-  product_area: [billing, payments]
+  product_area:
+    - billing
+    - payments
 ```
 
 ### Criterion judging
