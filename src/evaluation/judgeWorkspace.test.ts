@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
-import { describe, it } from 'vitest';
+import { describe, it, vi } from 'vitest';
 
 import {
   type ReadonlyWorkspace,
@@ -717,6 +717,58 @@ describe('collectJudgeWorkspaceEvidence', () => {
       'workspace_time_limit_reached',
     );
     assert.match(collected.renderedText, /time limit of 0ms reached/);
+  });
+
+  it('honors cancellation that arrives after a listing with no eligible files', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('cancelled', 'AbortError');
+    const workspace = {
+      ...fixture().workspace,
+      listFiles: () => {
+        const listing = Promise.resolve([file('pnpm-lock.yaml', 1)]);
+        // Runs before the collector's own continuation on the settled listing,
+        // so the abort lands after the listing settles but before it resumes.
+        void listing.then(() => queueMicrotask(() => controller.abort(reason)));
+        return listing;
+      },
+    };
+
+    await assert.rejects(
+      collectJudgeWorkspaceEvidence(workspace, { signal: controller.signal }),
+      (error: unknown) => error === reason,
+    );
+  });
+
+  it('records the time limit when the deadline passes during a listing with no eligible files', async () => {
+    const now = vi.spyOn(Date, 'now');
+    try {
+      let clock = 1_000;
+      now.mockImplementation(() => clock);
+      const workspace = {
+        ...fixture().workspace,
+        listFiles: () => {
+          const listing = Promise.resolve([file('pnpm-lock.yaml', 1)]);
+          // Pass the deadline after the listing settles, before the collector
+          // resumes.
+          void listing.then(() =>
+            queueMicrotask(() => {
+              clock += 100;
+            }),
+          );
+          return listing;
+        },
+      };
+      const collected = await collectJudgeWorkspaceEvidence(workspace, {
+        maxDurationMs: 50,
+      });
+      assert.equal(collected.evidence.truncated, true);
+      assert.deepEqual(
+        collected.evidence.warnings.map(({ code }) => code),
+        ['workspace_time_limit_reached'],
+      );
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('throws the caller abort reason rather than persisting partial evidence', async () => {
