@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'vitest';
+import { OPENCODE_EXPORT_LAUNCHER } from '../src/agents/opencode/export.ts';
 import {
   createOpenCodeAdapter,
   OPENCODE_STATE_ID,
@@ -153,13 +154,14 @@ describe('OpenCode whole-prompt judge budget integration', () => {
       const runtime = createFakeRuntimeAdapter({
         initialFiles: files,
         async command(call) {
+          const exporting = call.argv[2] === OPENCODE_EXPORT_LAUNCHER;
           const stdout =
             call.scope === 'uncredentialed'
               ? '1.19.0'
-              : call.argv[1] === 'export'
-                ? raw
+              : exporting
+                ? ''
                 : stream;
-          if (call.scope === 'agent' && call.argv[1] !== 'export') {
+          if (call.scope === 'agent' && !exporting) {
             const state =
               runtime.runs[0]!.stateDirectories.get(
                 OPENCODE_STATE_ID,
@@ -169,13 +171,15 @@ describe('OpenCode whole-prompt judge budget integration', () => {
               TASK,
             );
           }
+          if (exporting) {
+            await runtime.runs[0]!.stateDirectories.get(
+              OPENCODE_STATE_ID,
+            )!.mutable.writeFile('session.json', Buffer.from(raw));
+          }
           return {
             stdout,
             stderr: '',
-            exitCode:
-              call.argv[1] === 'export' && scenario.capture === 'failed'
-                ? 1
-                : 0,
+            exitCode: exporting && scenario.capture === 'failed' ? 1 : 0,
             durationMs: 1,
           };
         },

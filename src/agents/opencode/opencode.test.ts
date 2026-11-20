@@ -22,6 +22,7 @@ import {
   createMemoryWorkspace,
   createTestResolvedRunPlan,
 } from '../../testing/index.ts';
+import { OPENCODE_EXPORT_LAUNCHER } from './export.ts';
 import { createOpenCodeAdapter, OPENCODE_STATE_ID } from './index.ts';
 import { OPENCODE_LAUNCHER } from './launcher.ts';
 import { MAX_NATIVE_BYTES } from './native.ts';
@@ -76,15 +77,21 @@ async function fixture(
         agent: {
           async run(argv, options = {}) {
             calls.push({ argv: [...argv], options });
-            return command
-              ? command(argv, options)
+            const response = command
+              ? await command(argv, options)
               : result(
-                  argv[1] === 'export'
+                  argv.includes('export')
                     ? JSON.stringify(
                         openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
                       )
                     : openCodeStream({ prompt: 'Do it', response: 'Done' }),
                 );
+            if (argv[2] === OPENCODE_EXPORT_LAUNCHER)
+              await state.mutable.writeFile(
+                'session.json',
+                Buffer.from(response.stdout),
+              );
+            return response;
           },
         },
       },
@@ -237,6 +244,10 @@ describe('OpenCode adapter', () => {
     ]);
     assert.equal(test.calls[0]!.argv.includes('--session'), false);
     assert.deepEqual(test.calls[1]!.argv, [
+      'node',
+      '-e',
+      OPENCODE_EXPORT_LAUNCHER,
+      '/home/forge/.opencode-forge/session.json',
       'opencode',
       'export',
       OPEN_CODE_SESSION,
@@ -350,7 +361,7 @@ describe('OpenCode adapter', () => {
   it('invalidates stale exports and preserves a completed turn when export fails', async () => {
     let exports = 0;
     const test = await fixture(async (argv) => {
-      if (argv[1] !== 'export')
+      if (!argv.includes('export'))
         return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
       exports++;
       if (exports === 2) throw new Error('capture failed');
@@ -377,7 +388,7 @@ describe('OpenCode adapter', () => {
         openCodeExport([{ prompt: 'Do it', response: 'Done' }]),
       );
       const test = await fixture(async (argv) => {
-        if (argv[1] !== 'export')
+        if (!argv.includes('export'))
           return result(openCodeStream({ prompt: 'Do it', response: 'Done' }));
         exports++;
         if (exports === 1) return result(native);
@@ -447,7 +458,7 @@ describe('OpenCode adapter', () => {
     for (const phase of ['run', 'export']) {
       const controller = new AbortController();
       const test = await fixture(async (argv) => {
-        if ((argv[1] === 'export') === (phase === 'export')) {
+        if (argv.includes('export') === (phase === 'export')) {
           controller.abort(new Error('cancelled'));
           throw controller.signal.reason;
         }
