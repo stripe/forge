@@ -6,7 +6,6 @@ import {
   type AtifSystemStep,
   type AtifToolCall,
   type AtifTrajectoryV1_8,
-  AtifValidationError,
   isAtifTimestamp,
   type JsonObject,
   type JsonValue,
@@ -18,6 +17,13 @@ import type {
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
+import {
+  ClaudeSessionIncompleteError,
+  ClaudeSessionInvalidError,
+  ClaudeSessionLimitError,
+  omittedValueWarning,
+  safeSessionFailure,
+} from './evidenceDiagnostics.ts';
 import { isSafeSessionId } from './stream.ts';
 
 const MAX_SESSION_BYTES = 16 * 1024 * 1024;
@@ -25,29 +31,6 @@ const MAX_SESSION_LINES = 100_000;
 const MAX_SESSION_LINE_BYTES = 1024 * 1024;
 const MAX_RENDERED_ATTACHMENT_PARTS = 64;
 const SAFE_ATTACHMENT_TYPE = /^[a-z][a-z0-9_-]{0,127}$/;
-const ATIF_FIELD_NAMES = new Set([
-  'agent',
-  'arguments',
-  'content',
-  'extra',
-  'function_name',
-  'message',
-  'model_name',
-  'name',
-  'observation',
-  'reasoning_content',
-  'results',
-  'schema_version',
-  'session_id',
-  'source',
-  'source_call_id',
-  'step_id',
-  'steps',
-  'timestamp',
-  'tool_call_id',
-  'tool_calls',
-  'version',
-]);
 const HOOK_ATTACHMENT_RECORD_KEYS = new Set([
   'attachment',
   'cwd',
@@ -361,11 +344,12 @@ function recordsToAtif(
         );
       }
       if (content === undefined) {
-        warnings.push({
-          code: 'value_omitted',
-          message: 'A Claude assistant record had no content.',
-          path: `line:${line}`,
-        });
+        warnings.push(
+          omittedValueWarning(
+            'A Claude assistant record had no content.',
+            line,
+          ),
+        );
       }
       const blocks =
         typeof content === 'string'
@@ -394,12 +378,12 @@ function recordsToAtif(
         )
         .map((block, index): AtifToolCall => {
           if (typeof block.id !== 'string') {
-            warnings.push({
-              code: 'value_omitted',
-              message:
+            warnings.push(
+              omittedValueWarning(
                 'A Claude tool call had no identity; a synthetic one was assigned.',
-              path: `line:${line}`,
-            });
+                line,
+              ),
+            );
           }
           return {
             tool_call_id:
@@ -542,18 +526,20 @@ function attachToolResults(
       continue;
     }
     if (requestedCallId === undefined) {
-      warnings.push({
-        code: 'value_omitted',
-        message: 'A Claude tool result did not identify its tool call.',
-        path: `line:${recordIndex + 1}`,
-      });
+      warnings.push(
+        omittedValueWarning(
+          'A Claude tool result did not identify its tool call.',
+          recordIndex + 1,
+        ),
+      );
     }
     if (block.content === undefined) {
-      warnings.push({
-        code: 'value_omitted',
-        message: 'A Claude tool result had no content.',
-        path: `line:${recordIndex + 1}`,
-      });
+      warnings.push(
+        omittedValueWarning(
+          'A Claude tool result had no content.',
+          recordIndex + 1,
+        ),
+      );
     }
     const step = matchedStep ?? fallbackStep;
     const result: AtifObservationResult = {
@@ -620,25 +606,6 @@ function parseJsonl(raw: string, signal: AbortSignal): LocatedSessionRecord[] {
     records.push({ record: value as SessionRecord, line: lineCount });
   }
   return records;
-}
-
-class ClaudeSessionLimitError extends Error {}
-class ClaudeSessionIncompleteError extends Error {
-  constructor(
-    message: string,
-    readonly location?: { line: number; kind: string },
-  ) {
-    super(message);
-  }
-}
-class ClaudeSessionInvalidError extends Error {
-  constructor(
-    message: string,
-    readonly kind: string,
-    readonly line?: number,
-  ) {
-    super(message);
-  }
 }
 
 function jsonObject(
@@ -1138,37 +1105,4 @@ function plainRecord(value: unknown): Record<string, unknown> | undefined {
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return undefined;
   return value as Record<string, unknown>;
-}
-
-function safeSessionFailure(error: unknown): string {
-  if (error instanceof ClaudeSessionLimitError) {
-    return 'Claude session evidence exceeded a safety limit.';
-  }
-  if (error instanceof ClaudeSessionIncompleteError && error.location) {
-    if (
-      error.location.kind === 'compact summary' ||
-      error.location.kind === 'system/compact_boundary'
-    ) {
-      return `Claude compaction may replace earlier turns; complete conversation coverage cannot be established (${error.location.kind} at line ${error.location.line}).`;
-    }
-    return `Claude session evidence could not be normalized safely (${error.location.kind} at line ${error.location.line}).`;
-  }
-  if (error instanceof ClaudeSessionInvalidError) {
-    const location = error.line === undefined ? '' : ` at line ${error.line}`;
-    return `Claude session evidence could not be normalized safely (${error.kind}${location}).`;
-  }
-  if (error instanceof AtifValidationError) {
-    return `Claude session evidence could not be normalized safely (ATIF validation failed at ${safeAtifPath(error.issues[0]?.path ?? [])}).`;
-  }
-  return 'Claude session evidence could not be normalized safely.';
-}
-
-// Tool-call arguments and extras carry native keys, so the path stops at the
-// first segment that is not a field this converter writes.
-function safeAtifPath(path: readonly (string | number)[]): string {
-  const unsafeIndex = path.findIndex(
-    (segment) => typeof segment === 'string' && !ATIF_FIELD_NAMES.has(segment),
-  );
-  const safe = unsafeIndex === -1 ? path : path.slice(0, unsafeIndex);
-  return safe.length === 0 ? 'trajectory' : safe.join('.');
 }
