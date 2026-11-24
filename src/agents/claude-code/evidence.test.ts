@@ -182,7 +182,67 @@ describe('Claude native evidence', () => {
       kind: 'unavailable',
       reason: {
         code: 'source_invalid',
-        message: 'Claude session evidence could not be normalized safely.',
+        message:
+          'Claude session evidence could not be normalized safely (malformed JSONL at line 2).',
+      },
+    });
+  });
+
+  for (const { description, raw, diagnostic } of [
+    {
+      description: 'a non-object record',
+      raw: '{"type":"user"}\n["private-value"]',
+      diagnostic: 'non-object record at line 2',
+    },
+    {
+      description: 'a record from another session',
+      raw: [
+        { type: 'user', sessionId: 'session-1', message: { content: 'Hi' } },
+        { type: 'assistant', sessionId: 'private-session' },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+      diagnostic: 'session identity mismatch at line 2',
+    },
+    {
+      description: 'a session without an agent turn',
+      raw: JSON.stringify({ type: 'user', message: { content: 'Hi' } }),
+      diagnostic: 'no complete conversation',
+    },
+  ]) {
+    it(`names ${description} as the reason a session is invalid`, async () => {
+      assert.deepEqual(await nativeEvidence(raw), {
+        kind: 'unavailable',
+        reason: {
+          code: 'source_invalid',
+          message: `Claude session evidence could not be normalized safely (${diagnostic}).`,
+        },
+      });
+    });
+  }
+
+  it('names the ATIF field that failed validation', async () => {
+    const evidence = await loadClaudeEvidence({
+      project: createMemoryWorkspace({
+        'session-1.jsonl': [
+          { type: 'user', message: { content: 'Hi' } },
+          { type: 'assistant', message: { content: 'Done' } },
+        ]
+          .map((record) => JSON.stringify(record))
+          .join('\n'),
+      }).readonly,
+      sessionId: 'session-1',
+      agentVersion: '',
+      model: 'claude-test',
+      signal: new AbortController().signal,
+    });
+
+    assert.deepEqual(evidence, {
+      kind: 'unavailable',
+      reason: {
+        code: 'source_invalid',
+        message:
+          'Claude session evidence could not be normalized safely (ATIF validation failed at agent.version).',
       },
     });
   });
@@ -1251,6 +1311,54 @@ describe('Claude native evidence', () => {
         code: 'value_omitted',
         message: 'An invalid Claude timestamp was omitted.',
         path: 'line:1',
+      },
+    ]);
+  });
+
+  it('warns when a native record lacks a field the conversion fills in', async () => {
+    const evidence = await conversationEvidence([
+      { type: 'assistant', sessionId: 'session-1', message: {} },
+      {
+        type: 'assistant',
+        sessionId: 'session-1',
+        message: { content: [{ type: 'tool_use', name: 'Read' }] },
+      },
+      {
+        type: 'user',
+        sessionId: 'session-1',
+        message: { content: [{ type: 'tool_result' }] },
+      },
+    ]);
+
+    if (evidence.kind !== 'available') {
+      throw new Error('Expected available Claude evidence.');
+    }
+    assert.deepEqual(evidence.warnings, [
+      {
+        code: 'value_omitted',
+        message: 'A Claude assistant record had no content.',
+        path: 'line:2',
+      },
+      {
+        code: 'value_omitted',
+        message:
+          'A Claude tool call had no identity; a synthetic one was assigned.',
+        path: 'line:3',
+      },
+      {
+        code: 'value_omitted',
+        message: 'A Claude tool call had no input.',
+        path: 'line:3',
+      },
+      {
+        code: 'value_omitted',
+        message: 'A Claude tool result did not identify its tool call.',
+        path: 'line:4',
+      },
+      {
+        code: 'value_omitted',
+        message: 'A Claude tool result had no content.',
+        path: 'line:4',
       },
     ]);
   });

@@ -6,6 +6,7 @@ import {
   type AtifSystemStep,
   type AtifToolCall,
   type AtifTrajectoryV1_8,
+  AtifValidationError,
   isAtifTimestamp,
   type JsonObject,
   type JsonValue,
@@ -24,6 +25,29 @@ const MAX_SESSION_LINES = 100_000;
 const MAX_SESSION_LINE_BYTES = 1024 * 1024;
 const MAX_RENDERED_ATTACHMENT_PARTS = 64;
 const SAFE_ATTACHMENT_TYPE = /^[a-z][a-z0-9_-]{0,127}$/;
+const ATIF_FIELD_NAMES = new Set([
+  'agent',
+  'arguments',
+  'content',
+  'extra',
+  'function_name',
+  'message',
+  'model_name',
+  'name',
+  'observation',
+  'reasoning_content',
+  'results',
+  'schema_version',
+  'session_id',
+  'source',
+  'source_call_id',
+  'step_id',
+  'steps',
+  'timestamp',
+  'tool_call_id',
+  'tool_calls',
+  'version',
+]);
 const HOOK_ATTACHMENT_RECORD_KEYS = new Set([
   'attachment',
   'cwd',
@@ -268,8 +292,10 @@ function recordsToAtif(
     if (typeof recordSessionId === 'string') {
       reportedSessionId ??= recordSessionId;
       if (recordSessionId !== input.sessionId) {
-        throw new Error(
+        throw new ClaudeSessionInvalidError(
           'Claude session identity changed inside its native log.',
+          'session identity mismatch',
+          line,
         );
       }
     }
@@ -334,6 +360,13 @@ function recordsToAtif(
           'A Claude assistant record had unsupported conversation content.',
         );
       }
+      if (content === undefined) {
+        warnings.push({
+          code: 'value_omitted',
+          message: 'A Claude assistant record had no content.',
+          path: `line:${line}`,
+        });
+      }
       const blocks =
         typeof content === 'string'
           ? [{ type: 'text', text: content }]
@@ -359,20 +392,24 @@ function recordsToAtif(
           (block) =>
             block.type === 'tool_use' && typeof block.name === 'string',
         )
-        .map(
-          (block, index): AtifToolCall => ({
+        .map((block, index): AtifToolCall => {
+          if (typeof block.id !== 'string') {
+            warnings.push({
+              code: 'value_omitted',
+              message:
+                'A Claude tool call had no identity; a synthetic one was assigned.',
+              path: `line:${line}`,
+            });
+          }
+          return {
             tool_call_id:
               typeof block.id === 'string'
                 ? block.id
                 : `claude-call-${steps.length + 1}-${index + 1}`,
             function_name: block.name as string,
-            arguments: jsonObject(
-              block.input,
-              warnings,
-              `line:${recordIndex + 1}`,
-            ),
-          }),
-        );
+            arguments: jsonObject(block.input, warnings, `line:${line}`),
+          };
+        });
       addStep({
         source: 'agent',
         model_name: input.model,
@@ -407,7 +444,10 @@ function recordsToAtif(
     !steps.some(({ source }) => source === 'user') ||
     !steps.some(({ source }) => source === 'agent')
   ) {
-    throw new Error('Claude session contains no complete conversation.');
+    throw new ClaudeSessionInvalidError(
+      'Claude session contains no complete conversation.',
+      'no complete conversation',
+    );
   }
   return {
     trajectory: {
@@ -501,6 +541,20 @@ function attachToolResults(
       });
       continue;
     }
+    if (requestedCallId === undefined) {
+      warnings.push({
+        code: 'value_omitted',
+        message: 'A Claude tool result did not identify its tool call.',
+        path: `line:${recordIndex + 1}`,
+      });
+    }
+    if (block.content === undefined) {
+      warnings.push({
+        code: 'value_omitted',
+        message: 'A Claude tool result had no content.',
+        path: `line:${recordIndex + 1}`,
+      });
+    }
     const step = matchedStep ?? fallbackStep;
     const result: AtifObservationResult = {
       ...(matchedStep === undefined || requestedCallId === undefined
@@ -550,10 +604,18 @@ function parseJsonl(raw: string, signal: AbortSignal): LocatedSessionRecord[] {
     try {
       value = JSON.parse(line);
     } catch {
-      throw new Error('Claude session contains malformed JSONL.');
+      throw new ClaudeSessionInvalidError(
+        'Claude session contains malformed JSONL.',
+        'malformed JSONL',
+        lineCount,
+      );
     }
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      throw new Error('Claude session contains a non-object record.');
+      throw new ClaudeSessionInvalidError(
+        'Claude session contains a non-object record.',
+        'non-object record',
+        lineCount,
+      );
     }
     records.push({ record: value as SessionRecord, line: lineCount });
   }
@@ -569,6 +631,15 @@ class ClaudeSessionIncompleteError extends Error {
     super(message);
   }
 }
+class ClaudeSessionInvalidError extends Error {
+  constructor(
+    message: string,
+    readonly kind: string,
+    readonly line?: number,
+  ) {
+    super(message);
+  }
+}
 
 function jsonObject(
   value: unknown,
@@ -578,13 +649,14 @@ function jsonObject(
   const json = jsonValue(value);
   if (json !== null && typeof json === 'object' && !Array.isArray(json))
     return json;
-  if (value !== undefined) {
-    warnings.push({
-      code: 'value_omitted',
-      message: 'A non-object Claude tool input was wrapped for ATIF.',
-      path,
-    });
-  }
+  warnings.push({
+    code: 'value_omitted',
+    message:
+      value === undefined
+        ? 'A Claude tool call had no input.'
+        : 'A non-object Claude tool input was wrapped for ATIF.',
+    path,
+  });
   return value === undefined ? {} : { value: json };
 }
 
@@ -1081,5 +1153,22 @@ function safeSessionFailure(error: unknown): string {
     }
     return `Claude session evidence could not be normalized safely (${error.location.kind} at line ${error.location.line}).`;
   }
+  if (error instanceof ClaudeSessionInvalidError) {
+    const location = error.line === undefined ? '' : ` at line ${error.line}`;
+    return `Claude session evidence could not be normalized safely (${error.kind}${location}).`;
+  }
+  if (error instanceof AtifValidationError) {
+    return `Claude session evidence could not be normalized safely (ATIF validation failed at ${safeAtifPath(error.issues[0]?.path ?? [])}).`;
+  }
   return 'Claude session evidence could not be normalized safely.';
+}
+
+// Tool-call arguments and extras carry native keys, so the path stops at the
+// first segment that is not a field this converter writes.
+function safeAtifPath(path: readonly (string | number)[]): string {
+  const unsafeIndex = path.findIndex(
+    (segment) => typeof segment === 'string' && !ATIF_FIELD_NAMES.has(segment),
+  );
+  const safe = unsafeIndex === -1 ? path : path.slice(0, unsafeIndex);
+  return safe.length === 0 ? 'trajectory' : safe.join('.');
 }
