@@ -17,6 +17,13 @@ import type {
   AgentNativeEvidenceWarning,
 } from '../../contracts/agent.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
+import {
+  ClaudeSessionIncompleteError,
+  ClaudeSessionInvalidError,
+  ClaudeSessionLimitError,
+  omittedValueWarning,
+  safeSessionFailure,
+} from './evidenceDiagnostics.ts';
 import { isSafeSessionId } from './stream.ts';
 
 const MAX_SESSION_BYTES = 16 * 1024 * 1024;
@@ -268,8 +275,10 @@ function recordsToAtif(
     if (typeof recordSessionId === 'string') {
       reportedSessionId ??= recordSessionId;
       if (recordSessionId !== input.sessionId) {
-        throw new Error(
+        throw new ClaudeSessionInvalidError(
           'Claude session identity changed inside its native log.',
+          'session identity mismatch',
+          line,
         );
       }
     }
@@ -334,6 +343,14 @@ function recordsToAtif(
           'A Claude assistant record had unsupported conversation content.',
         );
       }
+      if (content === undefined) {
+        warnings.push(
+          omittedValueWarning(
+            'A Claude assistant record had no content.',
+            line,
+          ),
+        );
+      }
       const blocks =
         typeof content === 'string'
           ? [{ type: 'text', text: content }]
@@ -359,20 +376,24 @@ function recordsToAtif(
           (block) =>
             block.type === 'tool_use' && typeof block.name === 'string',
         )
-        .map(
-          (block, index): AtifToolCall => ({
+        .map((block, index): AtifToolCall => {
+          if (typeof block.id !== 'string') {
+            warnings.push(
+              omittedValueWarning(
+                'A Claude tool call had no identity; a synthetic one was assigned.',
+                line,
+              ),
+            );
+          }
+          return {
             tool_call_id:
               typeof block.id === 'string'
                 ? block.id
                 : `claude-call-${steps.length + 1}-${index + 1}`,
             function_name: block.name as string,
-            arguments: jsonObject(
-              block.input,
-              warnings,
-              `line:${recordIndex + 1}`,
-            ),
-          }),
-        );
+            arguments: jsonObject(block.input, warnings, `line:${line}`),
+          };
+        });
       addStep({
         source: 'agent',
         model_name: input.model,
@@ -407,7 +428,10 @@ function recordsToAtif(
     !steps.some(({ source }) => source === 'user') ||
     !steps.some(({ source }) => source === 'agent')
   ) {
-    throw new Error('Claude session contains no complete conversation.');
+    throw new ClaudeSessionInvalidError(
+      'Claude session contains no complete conversation.',
+      'no complete conversation',
+    );
   }
   return {
     trajectory: {
@@ -501,6 +525,22 @@ function attachToolResults(
       });
       continue;
     }
+    if (requestedCallId === undefined) {
+      warnings.push(
+        omittedValueWarning(
+          'A Claude tool result did not identify its tool call.',
+          recordIndex + 1,
+        ),
+      );
+    }
+    if (block.content === undefined) {
+      warnings.push(
+        omittedValueWarning(
+          'A Claude tool result had no content.',
+          recordIndex + 1,
+        ),
+      );
+    }
     const step = matchedStep ?? fallbackStep;
     const result: AtifObservationResult = {
       ...(matchedStep === undefined || requestedCallId === undefined
@@ -550,24 +590,22 @@ function parseJsonl(raw: string, signal: AbortSignal): LocatedSessionRecord[] {
     try {
       value = JSON.parse(line);
     } catch {
-      throw new Error('Claude session contains malformed JSONL.');
+      throw new ClaudeSessionInvalidError(
+        'Claude session contains malformed JSONL.',
+        'malformed JSONL',
+        lineCount,
+      );
     }
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      throw new Error('Claude session contains a non-object record.');
+      throw new ClaudeSessionInvalidError(
+        'Claude session contains a non-object record.',
+        'non-object record',
+        lineCount,
+      );
     }
     records.push({ record: value as SessionRecord, line: lineCount });
   }
   return records;
-}
-
-class ClaudeSessionLimitError extends Error {}
-class ClaudeSessionIncompleteError extends Error {
-  constructor(
-    message: string,
-    readonly location?: { line: number; kind: string },
-  ) {
-    super(message);
-  }
 }
 
 function jsonObject(
@@ -578,13 +616,14 @@ function jsonObject(
   const json = jsonValue(value);
   if (json !== null && typeof json === 'object' && !Array.isArray(json))
     return json;
-  if (value !== undefined) {
-    warnings.push({
-      code: 'value_omitted',
-      message: 'A non-object Claude tool input was wrapped for ATIF.',
-      path,
-    });
-  }
+  warnings.push({
+    code: 'value_omitted',
+    message:
+      value === undefined
+        ? 'A Claude tool call had no input.'
+        : 'A non-object Claude tool input was wrapped for ATIF.',
+    path,
+  });
   return value === undefined ? {} : { value: json };
 }
 
@@ -1066,20 +1105,4 @@ function plainRecord(value: unknown): Record<string, unknown> | undefined {
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return undefined;
   return value as Record<string, unknown>;
-}
-
-function safeSessionFailure(error: unknown): string {
-  if (error instanceof ClaudeSessionLimitError) {
-    return 'Claude session evidence exceeded a safety limit.';
-  }
-  if (error instanceof ClaudeSessionIncompleteError && error.location) {
-    if (
-      error.location.kind === 'compact summary' ||
-      error.location.kind === 'system/compact_boundary'
-    ) {
-      return `Claude compaction may replace earlier turns; complete conversation coverage cannot be established (${error.location.kind} at line ${error.location.line}).`;
-    }
-    return `Claude session evidence could not be normalized safely (${error.location.kind} at line ${error.location.line}).`;
-  }
-  return 'Claude session evidence could not be normalized safely.';
 }
