@@ -3478,6 +3478,19 @@ describe('Codex exact rollout evidence', () => {
     }
   });
 
+  it('rejects event types named after object prototype keys', async () => {
+    for (const type of ['constructor', 'toString', '__proto__']) {
+      const result = await load([
+        METADATA,
+        ...turn(),
+        record('event_msg', { type }),
+      ]);
+      assert.equal(result.kind, 'unavailable');
+      if (result.kind === 'unavailable')
+        assert.equal(result.reason.code, 'source_incomplete');
+    }
+  });
+
   it('rejects orphan/duplicate outputs and incomplete tool calls', async () => {
     for (const calls of [
       [

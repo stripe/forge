@@ -17,6 +17,11 @@ import type {
 } from '../../contracts/agent.ts';
 import type { ReadonlyWorkspace } from '../../contracts/runtime.ts';
 import {
+  type EventContext,
+  handleEvent,
+  type TurnProgress,
+} from './rolloutEvents.ts';
+import {
   CodexToolEvidenceError,
   codexToolSearchArguments,
   codexToolSearchOutput,
@@ -36,8 +41,8 @@ const DATE_TREE =
   /^sessions\/[0-9]{4}\/(?:0[1-9]|1[0-2])\/(?:0[1-9]|[12][0-9]|3[01])\/rollout-[0-9T:.-]+-([0-9a-f-]{36})\.jsonl$/;
 const FORMAT = 'codex-rollout-jsonl';
 
-type RecordValue = Record<string, unknown>;
-interface RolloutRecord {
+export type RecordValue = Record<string, unknown>;
+export interface RolloutRecord {
   readonly type: string;
   readonly timestamp?: unknown;
   readonly payload: RecordValue;
@@ -257,12 +262,14 @@ function normalizeRecords(
   const completedItems = new Set<string>();
   const completedWebSearches = new Set<string>();
   const turns = new Set<string>();
-  let activeTurn: string | undefined;
-  let turnCwd: string | undefined;
-  let completeTurns = 0;
-  let userInTurn = false;
-  let assistantInTurn = false;
-  let lastAssistantMessage: string | undefined;
+  const progress: TurnProgress = {
+    activeTurn: undefined,
+    turnCwd: undefined,
+    userInTurn: false,
+    assistantInTurn: false,
+    lastAssistantMessage: undefined,
+    completeTurns: 0,
+  };
   let worldState: RecordValue | undefined;
 
   const add = (
@@ -277,6 +284,19 @@ function normalizeRecords(
     } as AtifStep;
     steps.push(value);
     return value;
+  };
+  const events: EventContext = {
+    progress,
+    sessionId: input.sessionId,
+    model: input.model,
+    itemResponses,
+    turns,
+    calls,
+    completedCalls,
+    completedItems,
+    completedWebSearches,
+    warnings,
+    add,
   };
   const base = records[0].payload.base_instructions;
   if (base !== undefined && base !== null) {
@@ -304,123 +324,29 @@ function normalizeRecords(
       throw new Error('Codex rollout repeats session metadata.');
     if (record.type === 'compacted') throw new IncompleteRolloutError();
     if (record.type === 'world_state') {
-      if (activeTurn === undefined || userInTurn)
+      if (progress.activeTurn === undefined || progress.userInTurn)
         throw new IncompleteRolloutError();
       worldState = validateWorldState(payload, input.model, worldState);
       continue;
     }
     if (record.type === 'turn_context') {
       if (
-        activeTurn === undefined ||
-        payload.turn_id !== activeTurn ||
+        progress.activeTurn === undefined ||
+        payload.turn_id !== progress.activeTurn ||
         payload.model !== input.model
       )
         throw new Error('Codex turn context differs from the selected turn.');
-      turnCwd = typeof payload.cwd === 'string' ? payload.cwd : undefined;
+      progress.turnCwd =
+        typeof payload.cwd === 'string' ? payload.cwd : undefined;
       continue;
     }
     if (record.type === 'event_msg') {
-      const type = string(payload.type);
-      if (type === 'task_started') {
-        if (activeTurn !== undefined) throw new IncompleteRolloutError();
-        activeTurn = nonempty(payload.turn_id);
-        if (turns.has(activeTurn)) throw new IncompleteRolloutError();
-        turns.add(activeTurn);
-        turnCwd = undefined;
-        userInTurn = false;
-        assistantInTurn = false;
-        lastAssistantMessage = undefined;
-      } else if (type === 'task_complete') {
-        if (
-          activeTurn === undefined ||
-          payload.turn_id !== activeTurn ||
-          !userInTurn ||
-          !assistantInTurn ||
-          completedCalls.size !== calls.size
-        )
-          throw new IncompleteRolloutError();
-        if (
-          payload.last_agent_message !== undefined &&
-          payload.last_agent_message !== null
-        ) {
-          const finalMessage = string(payload.last_agent_message);
-          if (finalMessage && finalMessage !== lastAssistantMessage)
-            throw new IncompleteRolloutError();
-        }
-        completeTurns += 1;
-        activeTurn = undefined;
-      } else if (type === 'user_message') {
-        string(payload.message);
-        assertEmptyMedia(payload);
-      } else if (type === 'agent_message') {
-        const message = string(payload.message);
-        if (
-          activeTurn === undefined ||
-          !userInTurn ||
-          !itemResponses.assistantTexts.get(activeTurn)?.has(message)
-        )
-          throw new IncompleteRolloutError();
-      } else if (type === 'item_completed') {
-        if (
-          activeTurn === undefined ||
-          !userInTurn ||
-          payload.thread_id !== input.sessionId ||
-          payload.turn_id !== activeTurn
-        )
-          throw new IncompleteRolloutError();
-        const itemId = nonempty(object(payload.item).id);
-        if (completedItems.has(itemId)) throw new IncompleteRolloutError();
-        completedItems.add(itemId);
-        validateCompletedItem(payload, activeTurn, itemResponses, turnCwd);
-        const item = object(payload.item);
-        if (item.type === 'WebSearch') {
-          completedWebSearches.add(itemId);
-          if (calls.has(itemId)) throw new IncompleteRolloutError();
-          const step = add(
-            {
-              source: 'agent',
-              model_name: input.model,
-              message: '',
-              tool_calls: [
-                {
-                  tool_call_id: itemId,
-                  function_name: 'web_search',
-                  arguments: {
-                    query: string(item.query),
-                    action: item.action as JsonObject,
-                  },
-                },
-              ],
-            },
-            record,
-            index,
-          ) as AtifAgentStep;
-          calls.set(itemId, step);
-          completedCalls.add(itemId);
-          assistantInTurn = true;
-        }
-      } else if (type === 'thread_settings_applied') {
-        if (activeTurn !== undefined) throw new IncompleteRolloutError();
-        validateThreadSettings(payload, input.model);
-      } else if (type === 'token_count') {
-        if (payload.info !== null && payload.info !== undefined)
-          object(payload.info);
-      } else if (type === 'agent_reasoning') {
-        string(payload.text);
-        warnings.push({
-          code: 'value_omitted',
-          message:
-            'A Codex reasoning event was retained only in the native artifact.',
-          path: `line:${index + 1}`,
-        });
-      } else {
-        throw new IncompleteRolloutError();
-      }
+      handleEvent(payload, events, { record, index });
       continue;
     }
     if (record.type !== 'response_item') throw new IncompleteRolloutError();
     const type = string(payload.type);
-    validateResponseItem(payload, type, activeTurn);
+    validateResponseItem(payload, type, progress.activeTurn);
     if (type === 'message') {
       const role = string(payload.role);
       const text = messageContent(payload.content);
@@ -439,12 +365,12 @@ function normalizeRecords(
           index,
         );
       } else if (role === 'user' && actualUsers.has(index)) {
-        if (activeTurn === undefined || userInTurn)
+        if (progress.activeTurn === undefined || progress.userInTurn)
           throw new IncompleteRolloutError();
-        userInTurn = true;
+        progress.userInTurn = true;
         add({ source: 'user', message: text }, record, index);
       } else if (role === 'assistant') {
-        if (activeTurn === undefined || !userInTurn)
+        if (progress.activeTurn === undefined || !progress.userInTurn)
           throw new IncompleteRolloutError();
         if (
           payload.phase !== undefined &&
@@ -452,8 +378,8 @@ function normalizeRecords(
           payload.phase !== 'final_answer'
         )
           throw new IncompleteRolloutError();
-        assistantInTurn = true;
-        lastAssistantMessage = text;
+        progress.assistantInTurn = true;
+        progress.lastAssistantMessage = text;
         add(
           { source: 'agent', message: text, model_name: input.model },
           record,
@@ -467,7 +393,7 @@ function normalizeRecords(
       type === 'custom_tool_call' ||
       type === 'tool_search_call'
     ) {
-      if (activeTurn === undefined || !userInTurn)
+      if (progress.activeTurn === undefined || !progress.userInTurn)
         throw new IncompleteRolloutError();
       const id = nonempty(payload.call_id);
       if (calls.has(id)) throw new IncompleteRolloutError();
@@ -504,13 +430,13 @@ function normalizeRecords(
         index,
       ) as AtifAgentStep;
       calls.set(id, step);
-      assistantInTurn = true;
+      progress.assistantInTurn = true;
     } else if (
       type === 'function_call_output' ||
       type === 'custom_tool_call_output' ||
       type === 'tool_search_output'
     ) {
-      if (activeTurn === undefined || !userInTurn)
+      if (progress.activeTurn === undefined || !progress.userInTurn)
         throw new IncompleteRolloutError();
       const id = nonempty(payload.call_id);
       const step = calls.get(id);
@@ -520,7 +446,7 @@ function normalizeRecords(
         nativeCall?.payload.type === 'tool_search_call'
           ? 'tool_search_output'
           : `${nativeCall?.payload.type}_output`;
-      if (nativeCall?.turn !== activeTurn || type !== expectedOutput)
+      if (nativeCall?.turn !== progress.activeTurn || type !== expectedOutput)
         throw new IncompleteRolloutError();
       const toolFailed = itemResponses.toolFailures.get(id);
       if (
@@ -553,10 +479,10 @@ function normalizeRecords(
         ],
       };
     } else if (type === 'web_search_call') {
-      if (activeTurn === undefined || !userInTurn)
+      if (progress.activeTurn === undefined || !progress.userInTurn)
         throw new IncompleteRolloutError();
     } else if (type === 'reasoning') {
-      if (activeTurn === undefined || !userInTurn)
+      if (progress.activeTurn === undefined || !progress.userInTurn)
         throw new IncompleteRolloutError();
       const text = reasoningContent(payload);
       if (text)
@@ -587,8 +513,8 @@ function normalizeRecords(
     }
   }
   if (
-    activeTurn !== undefined ||
-    completeTurns === 0 ||
+    progress.activeTurn !== undefined ||
+    progress.completeTurns === 0 ||
     completedCalls.size !== calls.size ||
     completedWebSearches.size !== itemResponses.webSearches.size
   )
@@ -652,7 +578,7 @@ interface ItemResponse {
   readonly payload: RecordValue;
   readonly raw: string;
 }
-interface ItemResponses {
+export interface ItemResponses {
   readonly messages: ReadonlyMap<string, ItemResponse>;
   readonly assistantTexts: ReadonlyMap<string, ReadonlySet<string>>;
   readonly reasoning: ReadonlyMap<string, ItemResponse>;
@@ -832,7 +758,7 @@ function validateResponseItem(
     throw new IncompleteRolloutError();
 }
 
-function validateCompletedItem(
+export function validateCompletedItem(
   payload: RecordValue,
   turn: string,
   responses: ItemResponses,
@@ -1179,7 +1105,10 @@ function mergeWorldState(
   return result;
 }
 
-function validateThreadSettings(payload: RecordValue, model: string): void {
+export function validateThreadSettings(
+  payload: RecordValue,
+  model: string,
+): void {
   assertKeys(payload, ['type', 'thread_settings']);
   const settings = object(payload.thread_settings);
   assertKeys(settings, [
@@ -1266,7 +1195,7 @@ function isInjectedContext(text: string): boolean {
   );
 }
 
-function assertEmptyMedia(payload: RecordValue): void {
+export function assertEmptyMedia(payload: RecordValue): void {
   for (const name of ['images', 'local_images', 'text_elements']) {
     if (payload[name] !== undefined && array(payload[name]).length !== 0)
       throw new IncompleteRolloutError();
@@ -1306,7 +1235,7 @@ function assertBoundedJson(value: unknown, budget: { nodes: number }): void {
   }
 }
 
-function object(value: unknown): RecordValue {
+export function object(value: unknown): RecordValue {
   if (value === null || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Expected a Codex object.');
   return value as RecordValue;
@@ -1315,11 +1244,11 @@ function array(value: unknown): unknown[] {
   if (!Array.isArray(value)) throw new IncompleteRolloutError();
   return value;
 }
-function string(value: unknown): string {
+export function string(value: unknown): string {
   if (typeof value !== 'string') throw new Error('Expected Codex text.');
   return value;
 }
-function nonempty(value: unknown): string {
+export function nonempty(value: unknown): string {
   const text = string(value);
   if (!text) throw new Error('Expected a Codex identity.');
   return text;
@@ -1338,4 +1267,4 @@ function unavailable(
     },
   };
 }
-class IncompleteRolloutError extends Error {}
+export class IncompleteRolloutError extends Error {}
