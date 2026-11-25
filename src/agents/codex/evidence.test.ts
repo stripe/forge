@@ -231,10 +231,14 @@ function capturedWorldState() {
     },
   });
 }
-function capturedThreadSettings() {
+function capturedThreadSettings(
+  settings: Record<string, unknown> = {},
+  developerInstructions: string | null = null,
+) {
   return record('event_msg', {
     type: 'thread_settings_applied',
     thread_settings: {
+      ...settings,
       model: MODEL,
       model_provider_id: 'forge',
       approval_policy: 'never',
@@ -247,7 +251,7 @@ function capturedThreadSettings() {
         settings: {
           model: MODEL,
           reasoning_effort: null,
-          developer_instructions: null,
+          developer_instructions: developerInstructions,
         },
       },
     },
@@ -2695,6 +2699,130 @@ describe('Codex exact rollout evidence', () => {
         evidence.source,
       ),
       true,
+    );
+  });
+
+  // Minimized from `pay forge codex` terminal sessions on Codex CLI 0.149.0.
+  it('normalizes a second terminal prompt after collaboration-mode thread settings', async () => {
+    const evidence = await load([
+      METADATA,
+      ...capturedTurn(),
+      capturedThreadSettings(
+        { service_tier: 'default' },
+        'Collaboration mode instructions.',
+      ),
+      ...capturedTurn('Second prompt.', 'Second response.', 'turn-2'),
+    ]);
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available')
+      throw new Error('Expected native Codex evidence.');
+    const { steps } = parseAtifTrajectory(evidence.trajectory);
+    const settings = steps.find(
+      ({ message: text }) => text === 'Collaboration mode instructions.',
+    );
+    assert.equal(settings?.source, 'system');
+    assert.deepEqual(settings?.extra, {
+      native_record_type: 'event_msg',
+      native_field: 'collaboration_mode.developer_instructions',
+    });
+    assert.deepEqual(
+      steps
+        .filter(({ source }) => source !== 'system')
+        .map(({ message: text }) => text),
+      [
+        'First prompt.',
+        'First response.',
+        'Second prompt.',
+        'Second response.',
+      ],
+    );
+  });
+
+  it('keeps an interrupted terminal turn as a partial turn', async () => {
+    const aborted = (turnId: string) => [
+      ...capturedTurn('Second prompt.', 'unused', 'turn-2').slice(0, 4),
+      capturedResponse(
+        {
+          type: 'message',
+          id: 'aborted-turn-2',
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: '<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>',
+            },
+          ],
+        },
+        'turn-2',
+      ),
+      record('event_msg', {
+        type: 'turn_aborted',
+        turn_id: turnId,
+        reason: 'interrupted',
+        started_at: 1790091485,
+        completed_at: 1790091486,
+        duration_ms: 1000,
+      }),
+    ];
+    const records = (turnId: string) => [
+      METADATA,
+      ...capturedTurn(),
+      capturedThreadSettings(),
+      ...aborted(turnId),
+    ];
+    const evidence = await load(records('turn-2'));
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available')
+      throw new Error('Expected native Codex evidence.');
+    const { steps } = parseAtifTrajectory(evidence.trajectory);
+    assert.deepEqual(
+      steps
+        .filter(({ source }) => source !== 'system')
+        .map(({ message: text }) => text),
+      ['First prompt.', 'First response.', 'Second prompt.'],
+    );
+    assert.equal(steps.at(-1)?.source, 'system');
+    assert.match(String(steps.at(-1)?.message), /^<turn_aborted>/);
+
+    const mismatched = await load(records('turn-1'));
+    assert.equal(mismatched.kind, 'unavailable');
+    const onlyAborted = await load([
+      METADATA,
+      capturedThreadSettings(),
+      ...aborted('turn-2'),
+    ]);
+    assert.equal(onlyAborted.kind, 'unavailable');
+  });
+
+  it('accepts the multi-agent world state written after a model migration', async () => {
+    const worldState = (multiAgentMode: Record<string, unknown>) =>
+      record('world_state', {
+        full: true,
+        state: {
+          ...(capturedWorldState().payload.state as Record<string, unknown>),
+          multi_agent_mode: multiAgentMode,
+          multi_agent_usage_hint: 'usage-hint-hash',
+        },
+      });
+    const turnWith = (multiAgentMode: Record<string, unknown>) => {
+      const first = capturedTurn();
+      first.splice(1, 0, worldState(multiAgentMode));
+      return [METADATA, ...first];
+    };
+    assert.equal(
+      (
+        await load(
+          turnWith({
+            mode: 'explicitRequestOnly',
+            usage_hint_hash: 'usage-hint-hash',
+          }),
+        )
+      ).kind,
+      'available',
+    );
+    assert.equal(
+      (await load(turnWith({ mode: 'explicitRequestOnly', future: 'x' }))).kind,
+      'unavailable',
     );
   });
 

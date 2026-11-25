@@ -401,7 +401,27 @@ function normalizeRecords(
         }
       } else if (type === 'thread_settings_applied') {
         if (activeTurn !== undefined) throw new IncompleteRolloutError();
-        validateThreadSettings(payload, input.model);
+        const instructions = validateThreadSettings(payload, input.model);
+        if (instructions)
+          add(
+            {
+              source: 'system',
+              message: instructions,
+              extra: {
+                native_record_type: 'event_msg',
+                native_field: 'collaboration_mode.developer_instructions',
+              },
+            },
+            record,
+            index,
+          );
+      } else if (type === 'turn_aborted') {
+        // The terminal UI ends an interrupted turn without task_complete; it
+        // stays a partial turn and does not count as a completed one.
+        if (activeTurn === undefined || payload.turn_id !== activeTurn)
+          throw new IncompleteRolloutError();
+        string(payload.reason);
+        activeTurn = undefined;
       } else if (type === 'token_count') {
         if (payload.info !== null && payload.info !== undefined)
           object(payload.info);
@@ -1095,6 +1115,7 @@ function validateWorldState(
     'host_skills',
     'model',
     'multi_agent_mode',
+    'multi_agent_usage_hint',
     'orchestrator_skills',
     'permissions',
     'personality',
@@ -1103,6 +1124,8 @@ function validateWorldState(
     'skills',
   ]);
   if (state.model !== model) throw new IncompleteRolloutError();
+  if (state.multi_agent_usage_hint !== undefined)
+    string(state.multi_agent_usage_hint);
   for (const key of [
     'apps_instructions',
     'environments_instructions',
@@ -1134,7 +1157,9 @@ function validateWorldState(
   assertKeys(hostSkills, ['body', 'includeInstructions']);
   string(hostSkills.body);
   boolean(hostSkills.includeInstructions);
-  assertKeys(object(state.multi_agent_mode), []);
+  const multiAgent = object(state.multi_agent_mode);
+  assertKeys(multiAgent, ['mode', 'usage_hint_hash']);
+  for (const value of Object.values(multiAgent)) string(value);
   const orchestratorSkills = object(state.orchestrator_skills);
   assertKeys(orchestratorSkills, ['includeInstructions', 'enabled']);
   boolean(orchestratorSkills.includeInstructions);
@@ -1179,12 +1204,17 @@ function mergeWorldState(
   return result;
 }
 
-function validateThreadSettings(payload: RecordValue, model: string): void {
+/** Returns the collaboration mode's developer instructions, if any. */
+function validateThreadSettings(
+  payload: RecordValue,
+  model: string,
+): string | null {
   assertKeys(payload, ['type', 'thread_settings']);
   const settings = object(payload.thread_settings);
   assertKeys(settings, [
     'model',
     'model_provider_id',
+    'service_tier',
     'approval_policy',
     'approvals_reviewer',
     'permission_profile',
@@ -1201,6 +1231,7 @@ function validateThreadSettings(payload: RecordValue, model: string): void {
     'personality',
   ])
     string(settings[key]);
+  if (settings.service_tier !== undefined) string(settings.service_tier);
   const permissions = object(settings.permission_profile);
   assertKeys(permissions, ['type']);
   if (permissions.type !== 'disabled') throw new IncompleteRolloutError();
@@ -1213,13 +1244,12 @@ function validateThreadSettings(payload: RecordValue, model: string): void {
     'reasoning_effort',
     'developer_instructions',
   ]);
-  if (
-    collaboration.model !== model ||
-    collaboration.developer_instructions !== null
-  )
-    throw new IncompleteRolloutError();
+  if (collaboration.model !== model) throw new IncompleteRolloutError();
   if (collaboration.reasoning_effort !== null)
     string(collaboration.reasoning_effort);
+  return collaboration.developer_instructions === null
+    ? null
+    : string(collaboration.developer_instructions);
 }
 
 function validateStringObject(
@@ -1262,7 +1292,8 @@ function isInjectedContext(text: string): boolean {
   return (
     /^# AGENTS\.md instructions for [^\n]+\n/.test(text) ||
     (text.startsWith('<environment_context>') &&
-      text.endsWith('</environment_context>'))
+      text.endsWith('</environment_context>')) ||
+    (text.startsWith('<turn_aborted>') && text.endsWith('</turn_aborted>'))
   );
 }
 
