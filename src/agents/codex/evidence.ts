@@ -240,371 +240,579 @@ function validateSessionMetadata(
   }
 }
 
+interface NormalizedRollout {
+  readonly trajectory: AtifTrajectoryV1_8;
+  readonly warnings: AgentNativeEvidenceWarning[];
+}
+
+/** The record a handler is looking at, for step timestamps and warning paths. */
+interface RecordPosition {
+  readonly record: RolloutRecord;
+  readonly index: number;
+}
+
+/** A turn from task_started until it completes. */
+interface ActiveTurn {
+  readonly id: string;
+  cwd: string | undefined;
+  hasUser: boolean;
+  hasAssistant: boolean;
+  lastAssistantMessage: string | undefined;
+}
+
+/** Everything the record handlers read and change while one rollout is normalized. */
+interface NormalizationState {
+  readonly input: LoadCodexEvidenceInput;
+  readonly actualUsers: ReadonlySet<number>;
+  readonly itemResponses: ItemResponses;
+  readonly steps: AtifStep[];
+  readonly warnings: AgentNativeEvidenceWarning[];
+  readonly calls: Map<string, AtifAgentStep>;
+  readonly completedCalls: Set<string>;
+  readonly completedItems: Set<string>;
+  readonly completedWebSearches: Set<string>;
+  readonly turns: Set<string>;
+  turn: ActiveTurn | undefined;
+  completeTurns: number;
+  worldState: RecordValue | undefined;
+}
+
+type RecordHandler = (
+  payload: RecordValue,
+  state: NormalizationState,
+  at: RecordPosition,
+) => void;
+type HandlerTable = Readonly<Record<string, RecordHandler>>;
+type NewStep = Omit<AtifStep, 'step_id'>;
+
 function normalizeRecords(
   records: readonly RolloutRecord[],
   input: LoadCodexEvidenceInput,
-): { trajectory: AtifTrajectoryV1_8; warnings: AgentNativeEvidenceWarning[] } {
-  if (!records[0]) throw new Error('Codex rollout is empty.');
-  validateSessionMetadata(records[0], input.sessionId, input.sessionSource);
-  if (records[0].payload.cli_version !== input.agentVersion)
+): NormalizedRollout {
+  const first = records[0];
+  if (!first) throw new Error('Codex rollout is empty.');
+  validateSessionMetadata(first, input.sessionId, input.sessionSource);
+  if (first.payload.cli_version !== input.agentVersion)
     throw new Error('Codex rollout version differs from the adapter pin.');
-  const actualUsers = identifyUserMessages(records);
-  const itemResponses = indexItemResponses(records);
-  const steps: AtifStep[] = [];
-  const warnings: AgentNativeEvidenceWarning[] = [];
-  const calls = new Map<string, AtifAgentStep>();
-  const completedCalls = new Set<string>();
-  const completedItems = new Set<string>();
-  const completedWebSearches = new Set<string>();
-  const turns = new Set<string>();
-  let activeTurn: string | undefined;
-  let turnCwd: string | undefined;
-  let completeTurns = 0;
-  let userInTurn = false;
-  let assistantInTurn = false;
-  let lastAssistantMessage: string | undefined;
-  let worldState: RecordValue | undefined;
-
-  const add = (
-    step: Omit<AtifStep, 'step_id'>,
-    record: RolloutRecord,
-    index: number,
-  ): AtifStep => {
-    const value = {
-      ...step,
-      ...timestamp(record.timestamp, warnings, index),
-      step_id: steps.length + 1,
-    } as AtifStep;
-    steps.push(value);
-    return value;
-  };
-  const base = records[0].payload.base_instructions;
-  if (base !== undefined && base !== null) {
-    const text = string(object(base).text);
-    if (text)
-      add(
-        {
-          source: 'system',
-          message: text,
-          extra: {
-            native_record_type: 'session_meta',
-            native_field: 'base_instructions',
-          },
-        },
-        records[0],
-        0,
-      );
-  }
-
+  const state = initialState(records, input);
+  addBaseInstructions(first, state);
   for (const [index, record] of records.entries()) {
     input.signal.throwIfAborted();
     if (index === 0) continue;
-    const payload = record.payload;
-    if (record.type === 'session_meta')
-      throw new Error('Codex rollout repeats session metadata.');
-    if (record.type === 'compacted') throw new IncompleteRolloutError();
-    if (record.type === 'world_state') {
-      if (activeTurn === undefined || userInTurn)
-        throw new IncompleteRolloutError();
-      worldState = validateWorldState(payload, input.model, worldState);
-      continue;
-    }
-    if (record.type === 'turn_context') {
-      if (
-        activeTurn === undefined ||
-        payload.turn_id !== activeTurn ||
-        payload.model !== input.model
-      )
-        throw new Error('Codex turn context differs from the selected turn.');
-      turnCwd = typeof payload.cwd === 'string' ? payload.cwd : undefined;
-      continue;
-    }
-    if (record.type === 'event_msg') {
-      const type = string(payload.type);
-      if (type === 'task_started') {
-        if (activeTurn !== undefined) throw new IncompleteRolloutError();
-        activeTurn = nonempty(payload.turn_id);
-        if (turns.has(activeTurn)) throw new IncompleteRolloutError();
-        turns.add(activeTurn);
-        turnCwd = undefined;
-        userInTurn = false;
-        assistantInTurn = false;
-        lastAssistantMessage = undefined;
-      } else if (type === 'task_complete') {
-        if (
-          activeTurn === undefined ||
-          payload.turn_id !== activeTurn ||
-          !userInTurn ||
-          !assistantInTurn ||
-          completedCalls.size !== calls.size
-        )
-          throw new IncompleteRolloutError();
-        if (
-          payload.last_agent_message !== undefined &&
-          payload.last_agent_message !== null
-        ) {
-          const finalMessage = string(payload.last_agent_message);
-          if (finalMessage && finalMessage !== lastAssistantMessage)
-            throw new IncompleteRolloutError();
-        }
-        completeTurns += 1;
-        activeTurn = undefined;
-      } else if (type === 'user_message') {
-        string(payload.message);
-        assertEmptyMedia(payload);
-      } else if (type === 'agent_message') {
-        const message = string(payload.message);
-        if (
-          activeTurn === undefined ||
-          !userInTurn ||
-          !itemResponses.assistantTexts.get(activeTurn)?.has(message)
-        )
-          throw new IncompleteRolloutError();
-      } else if (type === 'item_completed') {
-        if (
-          activeTurn === undefined ||
-          !userInTurn ||
-          payload.thread_id !== input.sessionId ||
-          payload.turn_id !== activeTurn
-        )
-          throw new IncompleteRolloutError();
-        const itemId = nonempty(object(payload.item).id);
-        if (completedItems.has(itemId)) throw new IncompleteRolloutError();
-        completedItems.add(itemId);
-        validateCompletedItem(payload, activeTurn, itemResponses, turnCwd);
-        const item = object(payload.item);
-        if (item.type === 'WebSearch') {
-          completedWebSearches.add(itemId);
-          if (calls.has(itemId)) throw new IncompleteRolloutError();
-          const step = add(
-            {
-              source: 'agent',
-              model_name: input.model,
-              message: '',
-              tool_calls: [
-                {
-                  tool_call_id: itemId,
-                  function_name: 'web_search',
-                  arguments: {
-                    query: string(item.query),
-                    action: item.action as JsonObject,
-                  },
-                },
-              ],
-            },
-            record,
-            index,
-          ) as AtifAgentStep;
-          calls.set(itemId, step);
-          completedCalls.add(itemId);
-          assistantInTurn = true;
-        }
-      } else if (type === 'thread_settings_applied') {
-        if (activeTurn !== undefined) throw new IncompleteRolloutError();
-        validateThreadSettings(payload, input.model);
-      } else if (type === 'token_count') {
-        if (payload.info !== null && payload.info !== undefined)
-          object(payload.info);
-      } else if (type === 'agent_reasoning') {
-        string(payload.text);
-        warnings.push({
-          code: 'value_omitted',
-          message:
-            'A Codex reasoning event was retained only in the native artifact.',
-          path: `line:${index + 1}`,
-        });
-      } else {
-        throw new IncompleteRolloutError();
-      }
-      continue;
-    }
-    if (record.type !== 'response_item') throw new IncompleteRolloutError();
-    const type = string(payload.type);
-    validateResponseItem(payload, type, activeTurn);
-    if (type === 'message') {
-      const role = string(payload.role);
-      const text = messageContent(payload.content);
-      if (
-        role === 'system' ||
-        role === 'developer' ||
-        (role === 'user' && !actualUsers.has(index) && isInjectedContext(text))
-      ) {
-        add(
-          {
-            source: 'system',
-            message: text,
-            extra: { native_record_type: 'response_item', native_role: role },
-          },
-          record,
-          index,
-        );
-      } else if (role === 'user' && actualUsers.has(index)) {
-        if (activeTurn === undefined || userInTurn)
-          throw new IncompleteRolloutError();
-        userInTurn = true;
-        add({ source: 'user', message: text }, record, index);
-      } else if (role === 'assistant') {
-        if (activeTurn === undefined || !userInTurn)
-          throw new IncompleteRolloutError();
-        if (
-          payload.phase !== undefined &&
-          payload.phase !== 'commentary' &&
-          payload.phase !== 'final_answer'
-        )
-          throw new IncompleteRolloutError();
-        assistantInTurn = true;
-        lastAssistantMessage = text;
-        add(
-          { source: 'agent', message: text, model_name: input.model },
-          record,
-          index,
-        );
-      } else {
-        throw new IncompleteRolloutError();
-      }
-    } else if (
-      type === 'function_call' ||
-      type === 'custom_tool_call' ||
-      type === 'tool_search_call'
-    ) {
-      if (activeTurn === undefined || !userInTurn)
-        throw new IncompleteRolloutError();
-      const id = nonempty(payload.call_id);
-      if (calls.has(id)) throw new IncompleteRolloutError();
-      const name =
-        type === 'tool_search_call' ? 'tool_search' : nonempty(payload.name);
-      const namespace =
-        payload.namespace === undefined ? '' : string(payload.namespace);
-      const arguments_ =
-        type === 'tool_search_call'
-          ? codexToolSearchArguments(payload)
-          : type === 'function_call'
-            ? functionArguments(payload.arguments)
-            : { input: string(payload.input) };
-      const mcp = itemResponses.mcpSnapshots.get(id)?.payload;
-      const step = add(
-        {
-          source: 'agent',
-          model_name: input.model,
-          message: '',
-          tool_calls: [
-            {
-              tool_call_id: id,
-              function_name:
-                mcp && !namespace && name === mcp.tool
-                  ? `mcp__${string(mcp.server)}.${name}`
-                  : namespace
-                    ? `${namespace}.${name}`
-                    : name,
-              arguments: arguments_,
-            },
-          ],
-        },
-        record,
-        index,
-      ) as AtifAgentStep;
-      calls.set(id, step);
-      assistantInTurn = true;
-    } else if (
-      type === 'function_call_output' ||
-      type === 'custom_tool_call_output' ||
-      type === 'tool_search_output'
-    ) {
-      if (activeTurn === undefined || !userInTurn)
-        throw new IncompleteRolloutError();
-      const id = nonempty(payload.call_id);
-      const step = calls.get(id);
-      if (!step || completedCalls.has(id)) throw new IncompleteRolloutError();
-      const nativeCall = itemResponses.calls.get(id);
-      const expectedOutput =
-        nativeCall?.payload.type === 'tool_search_call'
-          ? 'tool_search_output'
-          : `${nativeCall?.payload.type}_output`;
-      if (nativeCall?.turn !== activeTurn || type !== expectedOutput)
-        throw new IncompleteRolloutError();
-      const toolFailed = itemResponses.toolFailures.get(id);
-      if (
-        toolFailed !== undefined &&
-        typeof payload.is_error === 'boolean' &&
-        payload.is_error !== toolFailed
-      )
-        throw new IncompleteRolloutError();
-      const isError =
-        typeof payload.is_error === 'boolean' ? payload.is_error : toolFailed;
-      completedCalls.add(id);
-      const content =
-        type === 'tool_search_output'
-          ? codexToolSearchOutput(payload)
-          : normalizeCodexToolOutput(payload.output, warnings, index);
-      if (itemResponses.truncatedTools.has(id))
-        warnings.push({
-          code: 'value_omitted',
-          message:
-            'Codex truncated this MCP result before showing it to the agent. The observed output is preserved; the full result remains only in the restricted native artifact.',
-          path: `line:${index + 1}.output`,
-        });
-      step.observation = {
-        results: [
-          {
-            source_call_id: id,
-            content,
-            ...(isError !== undefined ? { extra: { is_error: isError } } : {}),
-          },
-        ],
-      };
-    } else if (type === 'web_search_call') {
-      if (activeTurn === undefined || !userInTurn)
-        throw new IncompleteRolloutError();
-    } else if (type === 'reasoning') {
-      if (activeTurn === undefined || !userInTurn)
-        throw new IncompleteRolloutError();
-      const text = reasoningContent(payload);
-      if (text)
-        add(
-          {
-            source: 'agent',
-            model_name: input.model,
-            message: '',
-            reasoning_content: text,
-          },
-          record,
-          index,
-        );
-      if (
-        payload.encrypted_content !== undefined &&
-        payload.encrypted_content !== null
-      ) {
-        string(payload.encrypted_content);
-        warnings.push({
-          code: 'value_omitted',
-          message:
-            'Encrypted Codex reasoning was retained only in the native artifact.',
-          path: `line:${index + 1}`,
-        });
-      }
-    } else {
-      throw new IncompleteRolloutError();
-    }
+    handlerFor(RECORD_HANDLERS, record.type)(record.payload, state, {
+      record,
+      index,
+    });
   }
+  assertRolloutComplete(state);
+  return { trajectory: trajectory(state), warnings: state.warnings };
+}
+
+function initialState(
+  records: readonly RolloutRecord[],
+  input: LoadCodexEvidenceInput,
+): NormalizationState {
+  return {
+    input,
+    actualUsers: identifyUserMessages(records),
+    itemResponses: indexItemResponses(records),
+    steps: [],
+    warnings: [],
+    calls: new Map(),
+    completedCalls: new Set(),
+    completedItems: new Set(),
+    completedWebSearches: new Set(),
+    turns: new Set(),
+    turn: undefined,
+    completeTurns: 0,
+    worldState: undefined,
+  };
+}
+
+function addBaseInstructions(
+  first: RolloutRecord,
+  state: NormalizationState,
+): void {
+  const base = first.payload.base_instructions;
+  if (base === undefined || base === null) return;
+  const text = string(object(base).text);
+  if (text)
+    addStep(
+      state,
+      {
+        source: 'system',
+        message: text,
+        extra: {
+          native_record_type: 'session_meta',
+          native_field: 'base_instructions',
+        },
+      },
+      { record: first, index: 0 },
+    );
+}
+
+/** Unknown types fail closed. Own keys only, so `constructor` never matches. */
+function handlerFor(table: HandlerTable, type: string): RecordHandler {
+  const handler = Object.hasOwn(table, type) ? table[type] : undefined;
+  if (!handler) throw new IncompleteRolloutError();
+  return handler;
+}
+
+const RECORD_HANDLERS: HandlerTable = {
+  session_meta: rejectRepeatedSessionMetadata,
+  compacted: rejectCompactedHistory,
+  world_state: applyWorldState,
+  turn_context: applyTurnContext,
+  event_msg: (payload, state, at) =>
+    handlerFor(EVENT_HANDLERS, string(payload.type))(payload, state, at),
+  response_item: handleResponseItem,
+};
+
+function rejectRepeatedSessionMetadata(): void {
+  throw new Error('Codex rollout repeats session metadata.');
+}
+
+function rejectCompactedHistory(): void {
+  throw new IncompleteRolloutError();
+}
+
+function applyWorldState(
+  payload: RecordValue,
+  state: NormalizationState,
+): void {
+  if (state.turn === undefined || state.turn.hasUser)
+    throw new IncompleteRolloutError();
+  const snapshot = worldStateSnapshot(payload, state.worldState);
+  validateWorldState(snapshot, state.input.model);
+  state.worldState = snapshot;
+}
+
+function applyTurnContext(
+  payload: RecordValue,
+  state: NormalizationState,
+): void {
+  const turn = state.turn;
   if (
-    activeTurn !== undefined ||
-    completeTurns === 0 ||
-    completedCalls.size !== calls.size ||
-    completedWebSearches.size !== itemResponses.webSearches.size
+    turn === undefined ||
+    payload.turn_id !== turn.id ||
+    payload.model !== state.input.model
+  )
+    throw new Error('Codex turn context differs from the selected turn.');
+  turn.cwd = typeof payload.cwd === 'string' ? payload.cwd : undefined;
+}
+
+const EVENT_HANDLERS: HandlerTable = {
+  task_started: startTurn,
+  task_complete: completeTurn,
+  user_message: checkUserMessage,
+  agent_message: checkAgentMessage,
+  item_completed: completeItem,
+  thread_settings_applied: checkThreadSettings,
+  token_count: checkTokenCount,
+  agent_reasoning: omitAgentReasoning,
+};
+
+function startTurn(payload: RecordValue, state: NormalizationState): void {
+  if (state.turn !== undefined) throw new IncompleteRolloutError();
+  const id = nonempty(payload.turn_id);
+  if (state.turns.has(id)) throw new IncompleteRolloutError();
+  state.turns.add(id);
+  state.turn = {
+    id,
+    cwd: undefined,
+    hasUser: false,
+    hasAssistant: false,
+    lastAssistantMessage: undefined,
+  };
+}
+
+function completeTurn(payload: RecordValue, state: NormalizationState): void {
+  const turn = state.turn;
+  if (
+    turn === undefined ||
+    payload.turn_id !== turn.id ||
+    !turn.hasUser ||
+    !turn.hasAssistant ||
+    state.completedCalls.size !== state.calls.size
   )
     throw new IncompleteRolloutError();
-  return {
-    trajectory: {
-      schema_version: ATIF_SCHEMA_VERSION,
-      session_id: input.sessionId,
-      agent: {
-        name: 'codex',
-        version: input.agentVersion,
-        model_name: input.model,
-      },
-      steps,
+  const finalMessage = lastAgentMessage(payload);
+  if (finalMessage && finalMessage !== turn.lastAssistantMessage)
+    throw new IncompleteRolloutError();
+  state.completeTurns += 1;
+  state.turn = undefined;
+}
+
+function lastAgentMessage(payload: RecordValue): string | undefined {
+  return payload.last_agent_message === undefined ||
+    payload.last_agent_message === null
+    ? undefined
+    : string(payload.last_agent_message);
+}
+
+function checkUserMessage(payload: RecordValue): void {
+  string(payload.message);
+  assertEmptyMedia(payload);
+}
+
+function checkAgentMessage(
+  payload: RecordValue,
+  state: NormalizationState,
+): void {
+  const message = string(payload.message);
+  const turn = turnWithUser(state);
+  if (!state.itemResponses.assistantTexts.get(turn.id)?.has(message))
+    throw new IncompleteRolloutError();
+}
+
+function completeItem(
+  payload: RecordValue,
+  state: NormalizationState,
+  at: RecordPosition,
+): void {
+  const turn = turnWithUser(state);
+  if (
+    payload.thread_id !== state.input.sessionId ||
+    payload.turn_id !== turn.id
+  )
+    throw new IncompleteRolloutError();
+  const item = object(payload.item);
+  const itemId = nonempty(item.id);
+  if (state.completedItems.has(itemId)) throw new IncompleteRolloutError();
+  state.completedItems.add(itemId);
+  validateCompletedItem(payload, turn.id, state.itemResponses, turn.cwd);
+  if (item.type === 'WebSearch') addWebSearch(item, itemId, turn, state, at);
+}
+
+/** A completed web search has no separate output, so its call is complete at once. */
+function addWebSearch(
+  item: RecordValue,
+  id: string,
+  turn: ActiveTurn,
+  state: NormalizationState,
+  at: RecordPosition,
+): void {
+  state.completedWebSearches.add(id);
+  if (state.calls.has(id)) throw new IncompleteRolloutError();
+  const step = addStep(
+    state,
+    {
+      source: 'agent',
+      model_name: state.input.model,
+      message: '',
+      tool_calls: [
+        {
+          tool_call_id: id,
+          function_name: 'web_search',
+          arguments: {
+            query: string(item.query),
+            action: item.action as JsonObject,
+          },
+        },
+      ],
     },
-    warnings,
+    at,
+  ) as AtifAgentStep;
+  state.calls.set(id, step);
+  state.completedCalls.add(id);
+  turn.hasAssistant = true;
+}
+
+function checkThreadSettings(
+  payload: RecordValue,
+  state: NormalizationState,
+): void {
+  if (state.turn !== undefined) throw new IncompleteRolloutError();
+  validateThreadSettings(payload, state.input.model);
+}
+
+function checkTokenCount(payload: RecordValue): void {
+  if (payload.info !== null && payload.info !== undefined) object(payload.info);
+}
+
+function omitAgentReasoning(
+  payload: RecordValue,
+  state: NormalizationState,
+  at: RecordPosition,
+): void {
+  string(payload.text);
+  state.warnings.push({
+    code: 'value_omitted',
+    message:
+      'A Codex reasoning event was retained only in the native artifact.',
+    path: `line:${at.index + 1}`,
+  });
+}
+
+function handleResponseItem(
+  payload: RecordValue,
+  state: NormalizationState,
+  at: RecordPosition,
+): void {
+  const type = string(payload.type);
+  validateResponseItem(payload, type, state.turn?.id);
+  handlerFor(RESPONSE_HANDLERS, type)(payload, state, at);
+}
+
+const RESPONSE_HANDLERS: HandlerTable = {
+  message: addMessage,
+  function_call: addToolCall,
+  custom_tool_call: addToolCall,
+  tool_search_call: addToolCall,
+  function_call_output: addToolOutput,
+  custom_tool_call_output: addToolOutput,
+  tool_search_output: addToolOutput,
+  web_search_call: (_payload, state) => {
+    turnWithUser(state);
+  },
+  reasoning: addReasoning,
+};
+
+function addMessage(
+  payload: RecordValue,
+  state: NormalizationState,
+  at: RecordPosition,
+): void {
+  const role = string(payload.role);
+  const text = messageContent(payload.content);
+  const actualUser = state.actualUsers.has(at.index);
+  if (
+    role === 'system' ||
+    role === 'developer' ||
+    (role === 'user' && !actualUser && isInjectedContext(text))
+  )
+    addStep(
+      state,
+      {
+        source: 'system',
+        message: text,
+        extra: { native_record_type: 'response_item', native_role: role },
+      },
+      at,
+    );
+  else if (role === 'user' && actualUser) addUserMessage(text, state, at);
+  else if (role === 'assistant') addAssistantMessage(payload, text, state, at);
+  else throw new IncompleteRolloutError();
+}
+
+function addUserMessage(
+  text: string,
+  state: NormalizationState,
+  at: RecordPosition,
+): void {
+  const turn = state.turn;
+  if (turn === undefined || turn.hasUser) throw new IncompleteRolloutError();
+  turn.hasUser = true;
+  addStep(state, { source: 'user', message: text }, at);
+}
+
+function addAssistantMessage(
+  payload: RecordValue,
+  text: string,
+  state: NormalizationState,
+  at: RecordPosition,
+): void {
+  const turn = turnWithUser(state);
+  if (
+    payload.phase !== undefined &&
+    payload.phase !== 'commentary' &&
+    payload.phase !== 'final_answer'
+  )
+    throw new IncompleteRolloutError();
+  turn.hasAssistant = true;
+  turn.lastAssistantMessage = text;
+  addStep(
+    state,
+    { source: 'agent', message: text, model_name: state.input.model },
+    at,
+  );
+}
+
+function addToolCall(
+  payload: RecordValue,
+  state: NormalizationState,
+  at: RecordPosition,
+): void {
+  const turn = turnWithUser(state);
+  const type = string(payload.type);
+  const id = nonempty(payload.call_id);
+  if (state.calls.has(id)) throw new IncompleteRolloutError();
+  const name =
+    type === 'tool_search_call' ? 'tool_search' : nonempty(payload.name);
+  const namespace =
+    payload.namespace === undefined ? '' : string(payload.namespace);
+  const arguments_ = toolArguments(payload, type);
+  const mcp = state.itemResponses.mcpSnapshots.get(id)?.payload;
+  const step = addStep(
+    state,
+    {
+      source: 'agent',
+      model_name: state.input.model,
+      message: '',
+      tool_calls: [
+        {
+          tool_call_id: id,
+          function_name: toolFunctionName(name, namespace, mcp),
+          arguments: arguments_,
+        },
+      ],
+    },
+    at,
+  ) as AtifAgentStep;
+  state.calls.set(id, step);
+  turn.hasAssistant = true;
+}
+
+function toolArguments(payload: RecordValue, type: string): JsonObject {
+  if (type === 'tool_search_call') return codexToolSearchArguments(payload);
+  if (type === 'function_call') return functionArguments(payload.arguments);
+  return { input: string(payload.input) };
+}
+
+/** MCP calls are named by their server, other namespaced calls by their namespace. */
+function toolFunctionName(
+  name: string,
+  namespace: string,
+  mcp: RecordValue | undefined,
+): string {
+  if (mcp && !namespace && name === mcp.tool)
+    return `mcp__${string(mcp.server)}.${name}`;
+  return namespace ? `${namespace}.${name}` : name;
+}
+
+function addToolOutput(
+  payload: RecordValue,
+  state: NormalizationState,
+  at: RecordPosition,
+): void {
+  const turn = turnWithUser(state);
+  const type = string(payload.type);
+  const id = nonempty(payload.call_id);
+  const step = state.calls.get(id);
+  if (!step || state.completedCalls.has(id)) throw new IncompleteRolloutError();
+  const nativeCall = state.itemResponses.calls.get(id);
+  if (
+    !nativeCall ||
+    nativeCall.turn !== turn.id ||
+    type !== outputTypeFor(nativeCall.payload.type)
+  )
+    throw new IncompleteRolloutError();
+  const isError = toolOutputError(payload, id, state);
+  state.completedCalls.add(id);
+  const content =
+    type === 'tool_search_output'
+      ? codexToolSearchOutput(payload)
+      : normalizeCodexToolOutput(payload.output, state.warnings, at.index);
+  if (state.itemResponses.truncatedTools.has(id))
+    state.warnings.push({
+      code: 'value_omitted',
+      message:
+        'Codex truncated this MCP result before showing it to the agent. The observed output is preserved; the full result remains only in the restricted native artifact.',
+      path: `line:${at.index + 1}.output`,
+    });
+  step.observation = {
+    results: [
+      {
+        source_call_id: id,
+        content,
+        ...(isError !== undefined ? { extra: { is_error: isError } } : {}),
+      },
+    ],
+  };
+}
+
+function outputTypeFor(callType: unknown): string {
+  return callType === 'tool_search_call'
+    ? 'tool_search_output'
+    : `${callType}_output`;
+}
+
+/** The output's own error flag, or the failure its completion snapshot reported; they must agree. */
+function toolOutputError(
+  payload: RecordValue,
+  id: string,
+  state: NormalizationState,
+): boolean | undefined {
+  const toolFailed = state.itemResponses.toolFailures.get(id);
+  if (typeof payload.is_error !== 'boolean') return toolFailed;
+  if (toolFailed !== undefined && payload.is_error !== toolFailed)
+    throw new IncompleteRolloutError();
+  return payload.is_error;
+}
+
+function addReasoning(
+  payload: RecordValue,
+  state: NormalizationState,
+  at: RecordPosition,
+): void {
+  turnWithUser(state);
+  const text = reasoningContent(payload);
+  if (text)
+    addStep(
+      state,
+      {
+        source: 'agent',
+        model_name: state.input.model,
+        message: '',
+        reasoning_content: text,
+      },
+      at,
+    );
+  if (
+    payload.encrypted_content === undefined ||
+    payload.encrypted_content === null
+  )
+    return;
+  string(payload.encrypted_content);
+  state.warnings.push({
+    code: 'value_omitted',
+    message:
+      'Encrypted Codex reasoning was retained only in the native artifact.',
+    path: `line:${at.index + 1}`,
+  });
+}
+
+/** The active turn once its user message is in; anything earlier is out of order. */
+function turnWithUser(state: NormalizationState): ActiveTurn {
+  const turn = state.turn;
+  if (turn === undefined || !turn.hasUser) throw new IncompleteRolloutError();
+  return turn;
+}
+
+function addStep(
+  state: NormalizationState,
+  step: NewStep,
+  at: RecordPosition,
+): AtifStep {
+  const value = {
+    ...step,
+    ...timestamp(at.record.timestamp, state.warnings, at.index),
+    step_id: state.steps.length + 1,
+  } as AtifStep;
+  state.steps.push(value);
+  return value;
+}
+
+function assertRolloutComplete(state: NormalizationState): void {
+  if (
+    state.turn !== undefined ||
+    state.completeTurns === 0 ||
+    state.completedCalls.size !== state.calls.size ||
+    state.completedWebSearches.size !== state.itemResponses.webSearches.size
+  )
+    throw new IncompleteRolloutError();
+}
+
+function trajectory(state: NormalizationState): AtifTrajectoryV1_8 {
+  return {
+    schema_version: ATIF_SCHEMA_VERSION,
+    session_id: state.input.sessionId,
+    agent: {
+      name: 'codex',
+      version: state.input.agentVersion,
+      model_name: state.input.model,
+    },
+    steps: state.steps,
   };
 }
 
@@ -1070,20 +1278,19 @@ function completedMessage(
 }
 
 /** The pinned recorder uses full snapshots followed by RFC 7386 merge patches. */
-function validateWorldState(
+/** The full world state after this record: a snapshot, or a patch on the previous one. */
+function worldStateSnapshot(
   payload: RecordValue,
-  model: string,
-  previous?: RecordValue,
+  previous: RecordValue | undefined,
 ): RecordValue {
   assertKeys(payload, ['full', 'state']);
-  if (
-    typeof payload.full !== 'boolean' ||
-    (!payload.full && previous === undefined)
-  )
-    throw new IncompleteRolloutError();
-  const state = payload.full
-    ? object(payload.state)
-    : mergeWorldState(previous!, object(payload.state));
+  if (typeof payload.full !== 'boolean') throw new IncompleteRolloutError();
+  if (payload.full) return object(payload.state);
+  if (previous === undefined) throw new IncompleteRolloutError();
+  return mergeWorldState(previous, object(payload.state));
+}
+
+function validateWorldState(state: RecordValue, model: string): void {
   assertBoundedJson(state, { nodes: 0 });
   assertKeys(state, [
     'agents_md',
@@ -1151,7 +1358,6 @@ function validateWorldState(
   const skills = object(state.skills);
   assertKeys(skills, ['includeInstructions']);
   boolean(skills.includeInstructions);
-  return state;
 }
 
 function mergeWorldState(
