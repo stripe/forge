@@ -257,6 +257,7 @@ function normalizeRecords(
   const completedItems = new Set<string>();
   const completedWebSearches = new Set<string>();
   const turns = new Set<string>();
+  const interruptedTurns = new Set<string>();
   let activeTurn: string | undefined;
   let turnCwd: string | undefined;
   let completeTurns = 0;
@@ -349,6 +350,17 @@ function normalizeRecords(
         }
         completeTurns += 1;
         activeTurn = undefined;
+      } else if (type === 'turn_aborted' && input.sessionSource === 'cli') {
+        // Esc/Ctrl-C ends the turn without task_complete; it doesn't count as
+        // complete.
+        if (
+          activeTurn === undefined ||
+          payload.turn_id !== activeTurn ||
+          payload.reason !== 'interrupted'
+        )
+          throw new IncompleteRolloutError();
+        interruptedTurns.add(activeTurn);
+        activeTurn = undefined;
       } else if (type === 'user_message') {
         string(payload.message);
         assertEmptyMedia(payload);
@@ -360,6 +372,29 @@ function normalizeRecords(
           !itemResponses.assistantTexts.get(activeTurn)?.has(message)
         )
           throw new IncompleteRolloutError();
+      } else if (
+        type === 'item_completed' &&
+        typeof payload.turn_id === 'string' &&
+        interruptedTurns.has(payload.turn_id) &&
+        payload.turn_id !== activeTurn
+      ) {
+        // A command interrupted while running completes later, possibly in the
+        // next turn. It is validated against its own turn, so it must be that
+        // turn's call.
+        if (
+          payload.thread_id !== input.sessionId ||
+          object(payload.item).type !== 'CommandExecution'
+        )
+          throw new IncompleteRolloutError();
+        const itemId = nonempty(object(payload.item).id);
+        if (completedItems.has(itemId)) throw new IncompleteRolloutError();
+        completedItems.add(itemId);
+        validateCompletedItem(
+          payload,
+          payload.turn_id,
+          itemResponses,
+          undefined,
+        );
       } else if (type === 'item_completed') {
         if (
           activeTurn === undefined ||
@@ -682,12 +717,16 @@ function indexItemResponses(records: readonly RolloutRecord[]): ItemResponses {
       turn = nonempty(payload.turn_id);
     if (record.type === 'event_msg' && payload.type === 'task_complete')
       turn = undefined;
+    if (record.type === 'event_msg' && payload.type === 'turn_aborted')
+      turn = undefined;
     if (record.type === 'event_msg' && payload.type === 'item_completed') {
       const item = object(payload.item);
       if (item.type === 'CommandExecution' || item.type === 'FileChange') {
         if (item.status !== 'completed' && item.status !== 'failed')
           throw new IncompleteRolloutError();
-        toolFailures.set(nonempty(item.id), item.status === 'failed');
+        // A late completion must not change the result the agent saw.
+        if (payload.turn_id === turn)
+          toolFailures.set(nonempty(item.id), item.status === 'failed');
       } else if (item.type === 'McpToolCall') {
         const id = nonempty(item.id);
         if (
@@ -1191,8 +1230,10 @@ function validateThreadSettings(payload: RecordValue, model: string): void {
     'cwd',
     'personality',
     'collaboration_mode',
+    'service_tier',
   ]);
   if (settings.model !== model) throw new IncompleteRolloutError();
+  if (settings.service_tier !== undefined) string(settings.service_tier);
   for (const key of [
     'model_provider_id',
     'approval_policy',
@@ -1213,13 +1254,12 @@ function validateThreadSettings(payload: RecordValue, model: string): void {
     'reasoning_effort',
     'developer_instructions',
   ]);
-  if (
-    collaboration.model !== model ||
-    collaboration.developer_instructions !== null
-  )
-    throw new IncompleteRolloutError();
+  if (collaboration.model !== model) throw new IncompleteRolloutError();
   if (collaboration.reasoning_effort !== null)
     string(collaboration.reasoning_effort);
+  // The instructions are already in the session's developer message.
+  if (collaboration.developer_instructions !== null)
+    string(collaboration.developer_instructions);
 }
 
 function validateStringObject(
@@ -1262,7 +1302,8 @@ function isInjectedContext(text: string): boolean {
   return (
     /^# AGENTS\.md instructions for [^\n]+\n/.test(text) ||
     (text.startsWith('<environment_context>') &&
-      text.endsWith('</environment_context>'))
+      text.endsWith('</environment_context>')) ||
+    (text.startsWith('<turn_aborted>') && text.endsWith('</turn_aborted>'))
   );
 }
 
