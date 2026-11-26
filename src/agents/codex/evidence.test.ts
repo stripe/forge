@@ -83,6 +83,20 @@ async function load(records: readonly unknown[]) {
     context(createMemoryWorkspace({ [PATH]: jsonl(records) }).readonly),
   );
 }
+const TERMINAL_METADATA = record('session_meta', {
+  ...METADATA.payload,
+  source: 'cli',
+});
+/** A `pay forge codex` terminal session: records after its metadata. */
+async function loadTerminal(records: readonly unknown[]) {
+  return loadCodexEvidence({
+    ...context(
+      createMemoryWorkspace({ [PATH]: jsonl([TERMINAL_METADATA, ...records]) })
+        .readonly,
+    ),
+    sessionSource: 'cli',
+  });
+}
 
 // Minimized shapes captured from Codex CLI 0.149.0 against an offline, synthetic
 // Responses server. Paths, IDs, instructions and timings are fixture-only.
@@ -231,7 +245,10 @@ function capturedWorldState() {
     },
   });
 }
-function capturedThreadSettings() {
+function capturedThreadSettings(
+  settings: Record<string, unknown> = {},
+  developerInstructions: string | null = null,
+) {
   return record('event_msg', {
     type: 'thread_settings_applied',
     thread_settings: {
@@ -242,12 +259,13 @@ function capturedThreadSettings() {
       permission_profile: { type: 'disabled' },
       cwd: '/workspace',
       personality: 'pragmatic',
+      ...settings,
       collaboration_mode: {
         mode: 'default',
         settings: {
           model: MODEL,
           reasoning_effort: null,
-          developer_instructions: null,
+          developer_instructions: developerInstructions,
         },
       },
     },
@@ -2696,6 +2714,299 @@ describe('Codex exact rollout evidence', () => {
       ),
       true,
     );
+  });
+
+  // Minimized from `pay forge codex` terminal sessions on Codex CLI 0.149.0.
+  function secondPromptAfter(settings: Record<string, unknown>) {
+    return [
+      ...capturedTurn(),
+      settings,
+      ...capturedTurn('Second prompt.', 'Second response.', 'turn-2'),
+    ];
+  }
+
+  it('normalizes a second terminal prompt after collaboration-mode thread settings', async () => {
+    const evidence = await loadTerminal(
+      secondPromptAfter(
+        capturedThreadSettings(
+          { service_tier: 'default' },
+          'Collaboration mode instructions.',
+        ),
+      ),
+    );
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available')
+      throw new Error('Expected native Codex evidence.');
+    const { steps } = parseAtifTrajectory(evidence.trajectory);
+    assert.deepEqual(
+      steps
+        .filter(({ source }) => source !== 'system')
+        .map(({ message: text }) => text),
+      [
+        'First prompt.',
+        'First response.',
+        'Second prompt.',
+        'Second response.',
+      ],
+    );
+  });
+
+  it('rejects malformed terminal thread settings', async () => {
+    const missingInstructions = capturedThreadSettings();
+    delete (
+      missingInstructions.payload.thread_settings as {
+        collaboration_mode: { settings: Record<string, unknown> };
+      }
+    ).collaboration_mode.settings.developer_instructions;
+    for (const settings of [
+      capturedThreadSettings({ service_tier: 5 }),
+      capturedThreadSettings({}, 5 as unknown as string),
+      missingInstructions,
+    ]) {
+      const result = await loadTerminal(secondPromptAfter(settings));
+      assert.equal(result.kind, 'unavailable');
+    }
+  });
+
+  const ABORT_NOTE =
+    '<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>';
+  function abortNote(turnId: string) {
+    return capturedResponse(
+      {
+        type: 'message',
+        id: `aborted-${turnId}`,
+        role: 'user',
+        content: [{ type: 'input_text', text: ABORT_NOTE }],
+      },
+      turnId,
+    );
+  }
+
+  it('keeps an interrupted terminal turn as a partial turn', async () => {
+    const aborted = (turnId: string) => [
+      ...capturedTurn('Second prompt.', 'unused', 'turn-2').slice(0, 4),
+      abortNote('turn-2'),
+      record('event_msg', {
+        type: 'turn_aborted',
+        turn_id: turnId,
+        reason: 'interrupted',
+        started_at: 1790091485,
+        completed_at: 1790091486,
+        duration_ms: 1000,
+      }),
+    ];
+    const records = (turnId: string) => [
+      ...capturedTurn(),
+      capturedThreadSettings(),
+      ...aborted(turnId),
+    ];
+    const evidence = await loadTerminal(records('turn-2'));
+    assert.equal(evidence.kind, 'available');
+    if (evidence.kind !== 'available')
+      throw new Error('Expected native Codex evidence.');
+    const { steps } = parseAtifTrajectory(evidence.trajectory);
+    assert.deepEqual(
+      steps
+        .filter(({ source }) => source !== 'system')
+        .map(({ message: text }) => text),
+      ['First prompt.', 'First response.', 'Second prompt.'],
+    );
+    assert.equal(steps.at(-1)?.source, 'system');
+    assert.match(String(steps.at(-1)?.message), /^<turn_aborted>/);
+
+    const mismatched = await loadTerminal(records('turn-1'));
+    assert.equal(mismatched.kind, 'unavailable');
+    const onlyAborted = await loadTerminal([
+      capturedThreadSettings(),
+      ...aborted('turn-2'),
+    ]);
+    assert.equal(onlyAborted.kind, 'unavailable');
+    const exec = await load([METADATA, ...records('turn-2')]);
+    assert.equal(exec.kind, 'unavailable');
+  });
+
+  it('rejects a turn aborted for any reason but an interrupt', async () => {
+    for (const reason of ['replaced', 5]) {
+      const result = await loadTerminal([
+        ...capturedTurn(),
+        capturedThreadSettings(),
+        ...capturedTurn('Second prompt.', 'unused', 'turn-2').slice(0, 4),
+        record('event_msg', {
+          type: 'turn_aborted',
+          turn_id: 'turn-2',
+          reason,
+        }),
+      ]);
+      assert.equal(result.kind, 'unavailable');
+      if (result.kind === 'unavailable')
+        assert.equal(result.reason.code, 'source_incomplete');
+    }
+  });
+
+  // A command still running at an interrupt completes later, after the abort
+  // or during the next turn (both captured from `pay forge codex`, 0.149.0).
+  function interruptedCommand(turnId: string, callId: string) {
+    return [
+      capturedThreadSettings(),
+      ...capturedTurn('Run a slow command.', 'unused', turnId).slice(0, 4),
+      capturedResponse(
+        {
+          type: 'function_call',
+          id: `command-${callId}`,
+          name: 'exec_command',
+          arguments: '{"cmd":"sleep 30 && ls","max_output_tokens":1000}',
+          call_id: callId,
+        },
+        turnId,
+      ),
+      capturedResponse(
+        {
+          type: 'function_call_output',
+          id: `output-${callId}`,
+          call_id: callId,
+          output: 'aborted by user after 8.7s',
+        },
+        turnId,
+      ),
+      abortNote(turnId),
+      record('event_msg', {
+        type: 'turn_aborted',
+        turn_id: turnId,
+        reason: 'interrupted',
+      }),
+    ];
+  }
+  function lateCompletion(
+    callId: string,
+    turnId: string,
+    item: Record<string, unknown> = {},
+  ) {
+    return capturedItem(
+      {
+        type: 'CommandExecution',
+        id: callId,
+        process_id: '1234',
+        command: ['/bin/sh', '-lc', 'sleep 30 && ls'],
+        cwd: 'file:///workspace',
+        parsed_cmd: [{ type: 'unknown', cmd: 'sleep 30 && ls' }],
+        source: 'unified_exec_startup',
+        status: 'completed',
+        stdout: '',
+        stderr: '',
+        aggregated_output: '',
+        exit_code: 0,
+        duration: { secs: 29, nanos: 0 },
+        formatted_output: '',
+        ...item,
+      },
+      turnId,
+    );
+  }
+
+  it('accepts a command that completes after its turn was interrupted', async () => {
+    const failed = lateCompletion('call-slow', 'turn-2', {
+      status: 'failed',
+      exit_code: 1,
+    });
+    const nextTurn = capturedTurn('Next prompt.', 'Next response.', 'turn-3');
+    nextTurn.splice(4, 0, failed);
+    for (const records of [
+      [
+        ...capturedTurn(),
+        ...interruptedCommand('turn-2', 'call-slow'),
+        lateCompletion('call-slow', 'turn-2'),
+      ],
+      [
+        ...capturedTurn(),
+        ...interruptedCommand('turn-2', 'call-slow'),
+        capturedThreadSettings(),
+        ...nextTurn,
+      ],
+      [
+        ...capturedTurn(),
+        ...interruptedCommand('turn-2', 'call-slow'),
+        capturedThreadSettings(),
+        ...capturedTurn('Next prompt.', 'Next response.', 'turn-3'),
+        failed,
+      ],
+    ]) {
+      const evidence = await loadTerminal(records);
+      assert.equal(evidence.kind, 'available');
+      if (evidence.kind !== 'available')
+        throw new Error('Expected native Codex evidence.');
+      const { steps } = parseAtifTrajectory(evidence.trajectory);
+      const call = steps.find(({ tool_calls }) => tool_calls?.length);
+      // The agent saw the call aborted; the late completion doesn't change it.
+      assert.deepEqual(call?.observation?.results, [
+        { source_call_id: 'call-slow', content: 'aborted by user after 8.7s' },
+      ]);
+    }
+  });
+
+  it('rejects late completions that do not match their interrupted turn and call', async () => {
+    const twoInterrupted = [
+      ...capturedTurn(),
+      ...interruptedCommand('turn-2', 'call-slow'),
+      ...interruptedCommand('turn-3', 'call-third'),
+    ];
+    assert.equal((await loadTerminal(twoInterrupted)).kind, 'available');
+    const otherThread = lateCompletion('call-slow', 'turn-2');
+    for (const completion of [
+      lateCompletion('call-slow', 'turn-3'),
+      lateCompletion('call-third', 'turn-2'),
+      lateCompletion('call-slow', 'turn-1'),
+      lateCompletion('call-other', 'turn-2'),
+      lateCompletion('call-slow', 'turn-2', { type: 'FutureItem' }),
+      lateCompletion('call-slow', 'turn-2', { type: 'FileChange' }),
+      lateCompletion('call-slow', 'turn-2', { stdout: 5 }),
+      {
+        ...otherThread,
+        payload: { ...otherThread.payload, thread_id: OTHER_SESSION },
+      },
+    ]) {
+      const result = await loadTerminal([...twoInterrupted, completion]);
+      assert.equal(result.kind, 'unavailable');
+    }
+    const repeated = await loadTerminal([
+      ...twoInterrupted,
+      lateCompletion('call-slow', 'turn-2'),
+      lateCompletion('call-slow', 'turn-2'),
+    ]);
+    assert.equal(repeated.kind, 'unavailable');
+    const untypedTurn = await loadTerminal([
+      ...twoInterrupted,
+      lateCompletion('call-slow', 5 as unknown as string),
+    ]);
+    assert.equal(untypedTurn.kind, 'unavailable');
+    if (untypedTurn.kind === 'unavailable')
+      assert.equal(untypedTurn.reason.code, 'source_incomplete');
+
+    const completedInTurn = interruptedCommand('turn-2', 'call-slow');
+    completedInTurn.splice(-2, 0, lateCompletion('call-slow', 'turn-2'));
+    const inTurnThenLate = await loadTerminal([
+      ...capturedTurn(),
+      ...completedInTurn,
+      lateCompletion('call-slow', 'turn-2'),
+    ]);
+    assert.equal(inTurnThenLate.kind, 'unavailable');
+
+    const noOutput = interruptedCommand('turn-2', 'call-slow').filter(
+      ({ payload }) => payload.type !== 'function_call_output',
+    );
+    const unfinished = await loadTerminal([
+      ...capturedTurn(),
+      ...noOutput,
+      lateCompletion('call-slow', 'turn-2'),
+    ]);
+    assert.equal(unfinished.kind, 'unavailable');
+
+    const exec = await load([
+      METADATA,
+      ...capturedTurn(),
+      ...interruptedCommand('turn-2', 'call-slow'),
+      lateCompletion('call-slow', 'turn-2'),
+    ]);
+    assert.equal(exec.kind, 'unavailable');
   });
 
   it('retains resumed plugin context changes from captured world-state merge patches', async () => {
