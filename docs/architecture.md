@@ -1327,8 +1327,9 @@ from `request_retry` are ignored like `turn_duration`: they add no step or
 warning and do not reduce normalization completeness. Retry error bodies stay
 in the restricted native source. Claude `local_command` system records, a slash
 command and its output, become ATIF system steps in native order holding their
-string `content`, excluded from criterion judging; missing or empty content
-triggers `source_incomplete`. Compaction boundaries and summary flags
+nonempty string `content`, excluded from criterion judging; other content,
+unknown record fields, or a `commandRun` other than string `command` and `args`
+trigger `source_incomplete`. Compaction boundaries and summary flags
 remain `source_incomplete`, with their location and the unresolved loss of
 earlier turns made explicit.
 

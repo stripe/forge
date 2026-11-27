@@ -39,6 +39,24 @@ const HOOK_ATTACHMENT_RECORD_KEYS = new Set([
   'uuid',
   'version',
 ]);
+const LOCAL_COMMAND_RECORD_KEYS = new Set([
+  'commandRun',
+  'content',
+  'cwd',
+  'entrypoint',
+  'gitBranch',
+  'isMeta',
+  'isSidechain',
+  'level',
+  'parentUuid',
+  'sessionId',
+  'subtype',
+  'timestamp',
+  'type',
+  'userType',
+  'uuid',
+  'version',
+]);
 const IGNORED_RECORD_TYPES = new Set([
   'agent-name',
   'ai-title',
@@ -799,7 +817,11 @@ function localCommandStep(
   warnings: AgentNativeEvidenceWarning[],
   recordIndex: number,
 ): Omit<AtifSystemStep, 'step_id'> {
-  if (typeof record.content !== 'string' || record.content.length === 0) {
+  if (
+    typeof record.content !== 'string' ||
+    record.content.length === 0 ||
+    !hasLocalCommandEnvelope(record)
+  ) {
     throw incompleteRecord(
       record,
       recordIndex,
@@ -812,6 +834,25 @@ function localCommandStep(
     extra: { native_record_type: 'system', system_subtype: 'local_command' },
     ...timestampField(record.timestamp, warnings, recordIndex),
   };
+}
+
+function hasLocalCommandEnvelope(record: SessionRecord): boolean {
+  const envelope = plainRecord(record);
+  return (
+    envelope !== undefined &&
+    hasOnlyKeys(envelope, LOCAL_COMMAND_RECORD_KEYS) &&
+    (envelope.commandRun === undefined || isCommandRun(envelope.commandRun))
+  );
+}
+
+function isCommandRun(value: unknown): boolean {
+  const commandRun = plainRecord(value);
+  return (
+    commandRun !== undefined &&
+    hasExactKeys(commandRun, ['command', 'args']) &&
+    typeof commandRun.command === 'string' &&
+    typeof commandRun.args === 'string'
+  );
 }
 
 function recordBookkeepingOmission(

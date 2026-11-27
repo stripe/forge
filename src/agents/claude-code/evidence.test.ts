@@ -440,23 +440,45 @@ describe('Claude native evidence', () => {
     const output =
       '<local-command-stdout>MCP dialog dismissed</local-command-stdout>';
 
-    const evidence = await conversationEvidence([
-      {
-        type: 'system',
-        subtype: 'local_command',
-        content: invocation,
-        timestamp: '2026-11-27T17:17:46.995Z',
-        sessionId: 'session-1',
-      },
-      {
-        type: 'system',
-        subtype: 'local_command',
-        content: output,
-        timestamp: '2026-11-27T17:17:46.995Z',
-        sessionId: 'session-1',
-        commandRun: { command: 'mcp', args: '' },
-      },
-    ]);
+    const envelope = {
+      isSidechain: false,
+      type: 'system',
+      subtype: 'local_command',
+      level: 'info',
+      timestamp: '2026-11-27T17:17:46.995Z',
+      isMeta: false,
+      userType: 'external',
+      entrypoint: 'cli',
+      cwd: '/workspace',
+      sessionId: 'session-1',
+      version: '2.1.273',
+      gitBranch: 'HEAD',
+    };
+
+    const evidence = await nativeEvidence(
+      [
+        { ...envelope, parentUuid: null, uuid: 'uuid-1', content: invocation },
+        {
+          ...envelope,
+          parentUuid: 'uuid-1',
+          uuid: 'uuid-2',
+          content: output,
+          commandRun: { command: 'mcp', args: '' },
+        },
+        {
+          type: 'user',
+          sessionId: 'session-1',
+          message: { content: 'Do the task' },
+        },
+        {
+          type: 'assistant',
+          sessionId: 'session-1',
+          message: { content: 'Done' },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+    );
 
     if (evidence.kind !== 'available') {
       throw new Error('Expected available Claude evidence.');
@@ -465,13 +487,13 @@ describe('Claude native evidence', () => {
     assert.deepEqual(
       trajectory.steps.map(({ source, message }) => ({ source, message })),
       [
-        { source: 'user', message: 'Do the task' },
         { source: 'system', message: invocation },
         { source: 'system', message: output },
+        { source: 'user', message: 'Do the task' },
         { source: 'agent', message: 'Done' },
       ],
     );
-    for (const step of trajectory.steps.slice(1, 3)) {
+    for (const step of trajectory.steps.slice(0, 2)) {
       assert.equal(step.timestamp, '2026-11-27T17:17:46.995Z');
       assert.deepEqual(step.extra, {
         native_record_type: 'system',
@@ -1068,6 +1090,31 @@ describe('Claude native evidence', () => {
       description: 'local command without content',
       diagnosticKind: 'system',
       record: { type: 'system', subtype: 'local_command' },
+    },
+    {
+      description: 'local command with empty content',
+      diagnosticKind: 'system',
+      record: { type: 'system', subtype: 'local_command', content: '' },
+    },
+    {
+      description: 'local command with an unrecognized field',
+      diagnosticKind: 'system',
+      record: {
+        type: 'system',
+        subtype: 'local_command',
+        content: '<command-name>/mcp</command-name>',
+        stdout: 'unrepresented output',
+      },
+    },
+    {
+      description: 'local command with a malformed command run',
+      diagnosticKind: 'system',
+      record: {
+        type: 'system',
+        subtype: 'local_command',
+        content: '<local-command-stdout>ok</local-command-stdout>',
+        commandRun: { command: 'mcp' },
+      },
     },
     {
       description: 'unclassified system event',
