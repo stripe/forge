@@ -93,6 +93,7 @@ interface SessionRecord {
   type?: string;
   subtype?: string;
   source?: string;
+  content?: unknown;
   timestamp?: string;
   sessionId?: string;
   session_id?: string;
@@ -660,6 +661,10 @@ function handleNonConversationRecord(
   ) {
     return;
   }
+  if (record.type === 'system' && record.subtype === 'local_command') {
+    addStep(localCommandStep(record, warnings, recordIndex));
+    return;
+  }
   if (record.type === 'attachment') {
     const attachment = plainRecord(record.attachment);
     if (attachment === undefined) {
@@ -787,6 +792,26 @@ function handleNonConversationRecord(
     recordIndex,
     'A Claude session contained an unsupported conversation record.',
   );
+}
+
+function localCommandStep(
+  record: SessionRecord,
+  warnings: AgentNativeEvidenceWarning[],
+  recordIndex: number,
+): Omit<AtifSystemStep, 'step_id'> {
+  if (typeof record.content !== 'string' || record.content.length === 0) {
+    throw incompleteRecord(
+      record,
+      recordIndex,
+      'A Claude local command had unrepresented content.',
+    );
+  }
+  return {
+    source: 'system',
+    message: record.content,
+    extra: { native_record_type: 'system', system_subtype: 'local_command' },
+    ...timestampField(record.timestamp, warnings, recordIndex),
+  };
 }
 
 function recordBookkeepingOmission(

@@ -434,6 +434,53 @@ describe('Claude native evidence', () => {
     assert.deepEqual(evidence.warnings, []);
   });
 
+  it('maps Claude local commands to ATIF system steps in order', async () => {
+    const invocation =
+      '<command-name>/mcp</command-name>\n            <command-message>mcp</command-message>\n            <command-args></command-args>';
+    const output =
+      '<local-command-stdout>MCP dialog dismissed</local-command-stdout>';
+
+    const evidence = await conversationEvidence([
+      {
+        type: 'system',
+        subtype: 'local_command',
+        content: invocation,
+        timestamp: '2026-11-27T17:17:46.995Z',
+        sessionId: 'session-1',
+      },
+      {
+        type: 'system',
+        subtype: 'local_command',
+        content: output,
+        timestamp: '2026-11-27T17:17:46.995Z',
+        sessionId: 'session-1',
+        commandRun: { command: 'mcp', args: '' },
+      },
+    ]);
+
+    if (evidence.kind !== 'available') {
+      throw new Error('Expected available Claude evidence.');
+    }
+    const trajectory = parseAtifTrajectory(evidence.trajectory);
+    assert.deepEqual(
+      trajectory.steps.map(({ source, message }) => ({ source, message })),
+      [
+        { source: 'user', message: 'Do the task' },
+        { source: 'system', message: invocation },
+        { source: 'system', message: output },
+        { source: 'agent', message: 'Done' },
+      ],
+    );
+    for (const step of trajectory.steps.slice(1, 3)) {
+      assert.equal(step.timestamp, '2026-11-27T17:17:46.995Z');
+      assert.deepEqual(step.extra, {
+        native_record_type: 'system',
+        system_subtype: 'local_command',
+      });
+    }
+    assert.deepEqual(evidence.warnings, []);
+  });
+
   it('accepts a hook success only when its context is in the next rendered attachment', async () => {
     const context = 'Use the installed plugin for this task.';
 
@@ -1018,9 +1065,18 @@ describe('Claude native evidence', () => {
       },
     },
     {
-      description: 'conversation-bearing system event',
+      description: 'local command without content',
       diagnosticKind: 'system',
       record: { type: 'system', subtype: 'local_command' },
+    },
+    {
+      description: 'unclassified system event',
+      diagnosticKind: 'system',
+      record: {
+        type: 'system',
+        subtype: 'future_event',
+        content: 'unknown content',
+      },
     },
     {
       description: 'unclassified progress event',

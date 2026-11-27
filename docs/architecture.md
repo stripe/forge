@@ -1325,7 +1325,10 @@ content is omitted with a partial-detail warning that gives its record count
 and first line, regardless of repetition. Recognized `api_error` system records
 from `request_retry` are ignored like `turn_duration`: they add no step or
 warning and do not reduce normalization completeness. Retry error bodies stay
-in the restricted native source. Compaction boundaries and summary flags
+in the restricted native source. Claude `local_command` system records, a slash
+command and its output, become ATIF system steps in native order holding their
+string `content`, excluded from criterion judging; missing or empty content
+triggers `source_incomplete`. Compaction boundaries and summary flags
 remain `source_incomplete`, with their location and the unresolved loss of
 earlier turns made explicit.
 
